@@ -183,6 +183,7 @@ do
         yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
           | grep --invert-match " null$" \
           | sed -E 's/- - /- /' \
+          | sort --unique \
           > "${SERVICES_LIST_FILE}"
         yq prefix --inplace "${SERVICES_LIST_FILE}" "services"
         yq merge --inplace "${SERVICE_FILE_NAME}" "${SERVICES_LIST_FILE}"
