@@ -1,4 +1,4 @@
-# copy-toolchain-to-template
+# toolchain-to-template
 
 - log in to ibmcloud on the command line
 - ensure you have targeted a region (if none chosen by default: ibmcloud target -r us-south )
