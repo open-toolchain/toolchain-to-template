@@ -47,7 +47,7 @@ if [ -z "${prod_region}" ]; then
 fi
 
 
-url="${host}/devops/toolchains/${TOOLCHAIN_ID}?env_id=${env_id}"
+url="${host}/devops/toolchains/${TOOLCHAIN_ID}?env_id=${env_id}&isUIRequest=true"
 
 echo "Toolchain url is: $url"
 
@@ -56,6 +56,12 @@ OLD_TOOLCHAIN_JSON=$(curl \
   -H "Accept: application/json" \
   -H "include: everything" \
   "${url}")
+
+SERVICE_BROKERS=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.services | { "service_brokers": . }' )
+OLD_TOOLCHAIN_JSON=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.toolchain' )
+
+# echo "SERVICE_BROKERS is: ${SERVICE_BROKERS}"
+# echo "OLD_TOOLCHAIN_JSON is: ${OLD_TOOLCHAIN_JSON}"
 
 OLD_TOOLCHAIN_JSON_FILE="tmp.old_toolchain.json"
 echo "${OLD_TOOLCHAIN_JSON}" > "${OLD_TOOLCHAIN_JSON_FILE}"
@@ -189,6 +195,46 @@ do
         yq merge --inplace "${SERVICE_FILE_NAME}" "${SERVICES_LIST_FILE}"
         rm "${SERVICES_LIST_FILE}"
     fi
+
+    # suppress the value of any type:password parameter
+    echo "${SERVICE_BROKERS}" |  jq -r  --arg service_id "${SERVICE_ID}" \
+      '.service_brokers[] | select( .entity.unique_id == $service_id ) | .metadata.parameters.properties | keys[] | . ' |\
+    while IFS=$'\n\r' read -r property_name 
+    do
+      PROPERTY_TYPE=$( echo "${SERVICE_BROKERS}" |  jq -r  --arg service_id "${SERVICE_ID}" --arg property_name "${property_name}" \
+        '.service_brokers[] | select( .entity.unique_id == $service_id ) | .metadata.parameters.properties[$property_name] | .type' )
+      if [ "${PROPERTY_TYPE}" = "password"  ] ; then
+        FOUND=$( yq read "${SERVICE_FILE_NAME}" "${property_name}" )
+        if [ 'null' != "${FOUND}" ]; then
+          # echo "password property found: ${SERVICE_NAME} ${property_name}"
+          yq write --inplace "${SERVICE_FILE_NAME}" "${property_name}" ""
+        fi
+      fi
+    done
+    if [ 'private_worker' = "${SERVICE_ID}"  ] ; then
+        FOUND=$( yq read "${SERVICE_FILE_NAME}" 'workerQueueCredentials' )
+        if [ 'null' != "${FOUND}" ]; then
+          yq write --inplace "${SERVICE_FILE_NAME}" "workerQueueCredentials" ""
+        fi
+    fi
+    # paranoia, other properties not declared with type: password, but repressing due to name is suspicious:
+    FOUND=$( yq read "${SERVICE_FILE_NAME}" 'token' )
+    if [ 'null' != "${FOUND}" ]; then
+      yq write --inplace "${SERVICE_FILE_NAME}" "token" ""
+    fi
+    FOUND=$( yq read "${SERVICE_FILE_NAME}" 'access_token' )
+    if [ 'null' != "${FOUND}" ]; then
+      yq write --inplace "${SERVICE_FILE_NAME}" "access_token" ""
+    fi
+    FOUND=$( yq read "${SERVICE_FILE_NAME}" 'api_token' )
+    if [ 'null' != "${FOUND}" ]; then
+      yq write --inplace "${SERVICE_FILE_NAME}" "api_token" ""
+    fi
+    FOUND=$( yq read "${SERVICE_FILE_NAME}" 'password' )
+    if [ 'null' != "${FOUND}" ]; then
+      yq write --inplace "${SERVICE_FILE_NAME}" "password" ""
+    fi
+
     # build these up in reverse order (parameters, then service_id, then service_name, services):
     # services:
     #   sample-build:
