@@ -11,7 +11,7 @@
 - jq (https://stedolan.github.io/jq/) 
 - yq (https://github.com/mikefarah/yq)
 - chmod u+x export.sh
-- chmod u+x download_pipleine.sh
+- chmod u+x download_pipeline.sh
 - ./export.sh
 
 - verify it generated a folder toolchain-<datestamp>/.bluemix folder with a toolchain.yml file and pipeline_*.yml files
