@@ -7,11 +7,7 @@
 - find a toolchain guid on the same region you've connected on the command line
   that is, open the toolchain in a browser and copy the id from the url
 - export TOOLCHAIN_ID=*your-guid*
-- It requires cURL, 
-- jq (https://stedolan.github.io/jq/) 
-- yq (https://github.com/mikefarah/yq)
-- chmod u+x export.sh
-- chmod u+x download_pipeline.sh
+- It requires cURL, [jq] (https://stedolan.github.io/jq/), and [yq](https://github.com/mikefarah/yq)
 - ./export.sh
 
 - verify it generated a folder toolchain-*datestamp*/.bluemix/ with a toolchain.yml file and pipeline_*.yml files
