@@ -84,14 +84,7 @@ done
 jq -r '.stages[] | select( .triggers[0].type=="git" and .triggers[0].events == null ) | .name ' $SOURCE_PIPELINE_ID.json |\
 while IFS=$'\n\r' read -r stage_name 
 do
-  # token_url=$(cat "${SOURCE_PIPELINE_ID}_inputsources.json" | jq -r --arg git_repo "$input_gitrepo" '.[] | select( .repo_url==$git_repo ) | .token_url')
-  # echo "token url: $input_gitrepo => $token_url"
-
-  # Add a token field/line for input of type git and url being $git_repo
   cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
-
-  INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}" | sed -E 's/([^ ]+) .+/\1/' )
-  echo "service for repo url: $INPUT_REPO_SERVICE_NAME : $input_gitrepo"
 
   jq -r --arg stage_name "$stage_name" \
     '.stages[] | if ( .name==$stage_name ) then  .triggers[0]=( .triggers[0] + { "events": "{\"push\":true}" } ) else . end' \

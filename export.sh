@@ -105,7 +105,8 @@ do
     # webide
     SERVICE_NAME=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].toolchain_binding.name")
     if [ 'null' = "${SERVICE_NAME}"  ] ; then
-        SERVICE_NAME="${SERVICE_ID}${i}"
+        PREFIX_NUM=$( echo "0${i}" | sed -E 's/0*(.*..)$/\1/' )
+        SERVICE_NAME="service${PREFIX_NUM}"
     fi
 
     REPO_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].parameters.repo_url")
