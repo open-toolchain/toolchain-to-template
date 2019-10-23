@@ -1,21 +1,27 @@
 # toolchain-to-template
 
-- log in to ibmcloud on the command line
-- ensure you have targeted a region (if none chosen by default: ibmcloud target -r us-south )
-- download the 2 scripts; export.sh and download_pipeline.sh
-- note, it generates many temporary files - put your scripts into a folder to contain the temporary files
-- find a toolchain guid on the same region you've connected on the command line
-  that is, open the toolchain in a browser and copy the id from the url
-- export TOOLCHAIN_ID=*your-guid*
-- It requires cURL, [jq] (https://stedolan.github.io/jq/), and [yq](https://github.com/mikefarah/yq)
-- ./export.sh
+The toolchain-to-template script takes a Toolchain URL and will generate an OTC Template in the current folder that when run creates a clone of you original toolchain. For example:
+```
+./toolchain-to-template.sh https://cloud.ibm.com/devops/toolchains/2665ce98-ea71-43e8-b723-19bafdb7a541?env_id=ibm:yp:us-east`
+```
 
-- verify it generated a folder toolchain-*datestamp*/.bluemix/ with a toolchain.yml file and pipeline_*.yml files
 
-- create a new git repo, check in the .bluemix folder and files into the new git repo (can be private, but would need a token to access).
+---
+### SETUP
+0) These script requires that the following utilities are pre-installed on your PATH: ibmcloud, cURL, jq (https://stedolan.github.io/jq/), and yq (https://github.com/mikefarah/yq) 
+1) Create a temporary work folder to use to generate your template
+2) Download and copy `toolchain-to-template.sh` to your work folder
+3) Use ibmcloud CLI to login to the account where your toolchain resides
+4) Visit your Toolchain in the browser and copy the URL
 
-- Compose a URL to the setup/deploy page:
- https://cloud.ibm.com/devops/setup/deploy?repository=https://us-south.git.cloud.ibm.com/myrepo/try-from-toolchain-generated&env_id=ibm:yp:us-south&repository_token=some-token
+### RUN THE SCRIPT
+In a shell run the following: `./toolchain-to-template.sh https://your-toolchain-url`
 
-- open that, click Create.
+The script generates a `.bluemix` folder that contains your template. To use the template create a git repo and
+copy the `.bluemix` folder into it. Commit, push and then visit your repository on an OTC Setup/Deploy page.
 
+e.g https://cloud.ibm.com/devops/setup/deploy?env_id=ibm:yp:us-south&repository=https://your_repository_url
+
+(Note: if your repository is private add "&repository_token=your_git_access_token")
+
+Open that URL in a browser and click "Create" and you will have a newly minted clone of your original toolchain

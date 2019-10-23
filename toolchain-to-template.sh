@@ -1,76 +1,165 @@
 #!/bin/bash
 
-# To use this script:
-# - log in to ibmcloud on the command line
-# - ensure you have targeted a region (if none chosen by default: ibmcloud target -r us-south )
-# - download the 2 scripts; export.sh and download_pipeline.sh
-# - note, it generates many temporary files - put your scripts into a folder to contain the temporary files
-# - find a toolchain guid on the same region you've connected on the command line
-#   that is, open the toolchain in a browser and copy the id from the url
-# - export TOOLCHAIN_ID=<your-guid>
-# - It requires cURL, 
-# - jq (https://stedolan.github.io/jq/) 
-# - yq (https://github.com/mikefarah/yq)
-# - chmod u+x export.sh
-# - chmod u+x download_pipleine.sh
-# - ./export.sh
-# - verify it generated a folder toolchain-<datestamp>/.bluemix folder with a toolchain.yml file and pipeline_*.yml files
-# - create a new git repo, check in the .bluemix folders and files into the new git repo (can be private, but would need a token to access).
-# - Compose a URL to the setup/deploy page:
-#  https://cloud.ibm.com/devops/setup/deploy?repository=https://us-south.git.cloud.ibm.com/myrepo/try-from-toolchain-generated&env_id=ibm:yp:us-south&repository_token=some-token
-# - open that, click Create.
+# The toolchain-to-template script takes a Toolchain URL and will generate an OTC Template that when run creates a clone
+# of you original toolchain.
+#
+# SETUP:
+# 0) These script requires that the following utilities are pre-installed on your PATH: ibmcloud, cURL, 
+#    jq (https://stedolan.github.io/jq/), and yq (https://github.com/mikefarah/yq) 
+# 1) Create a temporary work folder to use to generate your template
+# 2) Download and copy `toolchain-to-template.sh` to your work folder
+# 3) Use ibmcloud CLI to login to the account where your toolchain resides
+# 4) Visit your Toolchain in the browser and copy the URL
+#
+# RUN THE SCRIPT
+# In a shell run the following: `./toolchain-to-template.sh https://your-toolchain-url`
+#
+# The script generates a .bluemix folder that contains your template. To use the template create a git repo and
+# copy the .bluemix folder into it. Commit, push and then visit your repository on an OTC Setup/Deploy page.
+# e.g https://cloud.ibm.com/devops/setup/deploy?env_id=ibm:yp:us-south&repository=https://your_repository_url
+# (Note: if your repository is private add "&repository_token=your_git_access_token")
+# Open that URL in a browser and click "Create" and you will have a newly minted clone of your original toolchain
+
+PIPELINE_API_URL=
+BEARER_TOKEN=
+
+function download_pipeline() {
+
+local SOURCE_PIPELINE_ID=$1
+local TARGET_PIPELINE_ID=$2
+local INPUT_REPO_SERVICES_DETAILS=$3
+
+echo "about to do: curl -H Accept: application/x-yaml ${PIPELINE_API_URL}/pipelines/${SOURCE_PIPELINE_ID}"
+curl -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}/pipelines/${SOURCE_PIPELINE_ID}"
+
+# echo "YAML from source pipeline"
+# cat "${SOURCE_PIPELINE_ID}.yaml"
+
+# Find the token url for the git tile
+# echo "about to get: ${PIPELINE_API_URL}/pipelines/${SOURCE_PIPELINE_ID}/inputsources"
+# curl -H "Authorization: $BEARER_TOKEN" -H "Content-Type: application/json" -o "${SOURCE_PIPELINE_ID}_inputsources.json" "${PIPELINE_API_URL}/pipelines/${SOURCE_PIPELINE_ID}/inputsources"
+
+# convert the yaml to json 
+# yq r -j ${SOURCE_PIPELINE_ID}.yaml | tee ${SOURCE_PIPELINE_ID}.json
+yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
+
+# Remove the hooks and (temporary workaround) the workers definition also
+jq 'del(. | .hooks)' $SOURCE_PIPELINE_ID.json | jq 'del(.stages[] | .worker)' > "${TARGET_PIPELINE_ID}.json"
+
+# add the input service 
+## Add the token url
+jq -r '.stages[] | select( .inputs[0].type=="git") | .inputs[0].url' $SOURCE_PIPELINE_ID.json |\
+while IFS=$'\n\r' read -r input_gitrepo 
+do
+  # token_url=$(cat "${SOURCE_PIPELINE_ID}_inputsources.json" | jq -r --arg git_repo "$input_gitrepo" '.[] | select( .repo_url==$git_repo ) | .token_url')
+  # echo "token url: $input_gitrepo => $token_url"
+
+  # Add a token field/line for input of type git and url being $git_repo
+  cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+
+  INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}" | sed -E 's/([^ ]+) .+/\1/' )
+  echo "service for repo url: $INPUT_REPO_SERVICE_NAME : $input_gitrepo"
+
+    # '.stages[] | if ( .inputs[0].type=="git" and .inputs[0].url==$input_gitrepo) then  .inputs[0]=(.inputs[0] + { "service": $repo_service }) else . end' \
+  jq -r --arg input_gitrepo "$input_gitrepo"  --arg repo_service "${INPUT_REPO_SERVICE_NAME}" \
+    '.stages[] | if ( .inputs[0].type=="git" and .inputs[0].url==$input_gitrepo) then  .inputs[0]=( .inputs[0] + { "service": $repo_service }) else . end' \
+    tmp-$TARGET_PIPELINE_ID.json \
+    | jq -s '{"stages": .}' > ${TARGET_PIPELINE_ID}.json
+done
+
+# convert:
+# stages:
+# - name: BUILD
+#   triggers:
+#   - events: null
+#     type: git
+# to have:
+#   - events: '{"push":true}'
+
+jq -r '.stages[] | select( .triggers[0].type=="git" and .triggers[0].events == null ) | .name ' $SOURCE_PIPELINE_ID.json |\
+while IFS=$'\n\r' read -r stage_name 
+do
+  cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+
+  jq -r --arg stage_name "$stage_name" \
+    '.stages[] | if ( .name==$stage_name ) then  .triggers[0]=( .triggers[0] + { "events": "{\"push\":true}" } ) else . end' \
+    tmp-$TARGET_PIPELINE_ID.json \
+    | jq -s '{"stages": .}' > ${TARGET_PIPELINE_ID}.json
+done
+
+# remove the input url
+cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+jq -r 'del( .stages[] | .inputs[] | select( .type == "git" ) | .url )' tmp-$TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.json
+
+# Add the pipeline properties in the target
+cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+jq --slurpfile sourcecontent ./${SOURCE_PIPELINE_ID}.json '.stages | {"stages": ., "properties": $sourcecontent[0].properties }' ./tmp-${TARGET_PIPELINE_ID}.json > ${TARGET_PIPELINE_ID}.json
+
+# yq r $TARGET_PIPELINE_ID.json | tee $TARGET_PIPELINE_ID.yaml
+yq r $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
+
+echo "$TARGET_PIPELINE_ID.yml generated"
+# echo "==="
+# cat "$TARGET_PIPELINE_ID.yml"
+# echo "==="
+
+# Include the yaml as rawcontent (ie needs to replace cr by \n and " by \" )
+# echo '{}' | jq --rawfile yaml $TARGET_PIPELINE_ID.yaml '{"config": {"format": "yaml","content": $yaml}}' > ${TARGET_PIPELINE_ID}_configuration.json
+
+# # HTTP PUT to target pipeline
+# curl -is -H "Authorization: $BEARER_TOKEN" -H "Content-Type: application/json" -X PUT -d @${TARGET_PIPELINE_ID}_configuration.json $PIPELINE_API_URL/pipelines/$TARGET_PIPELINE_ID/configuration 
+
+# Check the configuration if it has been applied correctly
+# curl -H "Authorization: $BEARER_TOKEN" -H "Accept: application/json" $PIPELINE_API_URL/pipelines/$TARGET_PIPELINE_ID/configuration
+
+# echoing the secured properties (pipeline and stage) that can not be valued there
+echo "The following pipeline secure properties needs to be updated with appropriate values:"
+jq -r '.properties[] | select(.type=="secure") | .name' ${TARGET_PIPELINE_ID}.json
+
+echo "The following stage secure properties needs to be updated with appropriate values:"
+jq -r '.stages[] | . as $stage | .properties // [] | .[] | select(.type=="secure") | [$stage.name] + [.name] | join(" - ")' ${TARGET_PIPELINE_ID}.json
+
+}
 
 
-token=$(ibmcloud iam oauth-tokens | head -1 | sed 's/.*:[ \t]*//')
-# api_key=$(ibmcloud iam api-key-create "api-key created on $(date)" | grep "API Key" | sed 's/API Key[ ]*\([^ ]*\)[ ]*/\1/g')
-# resource_group_id=$(ibmcloud resource groups --output json | jq -r '.[0].id')
-# org_name=$(ibmcloud cf t | grep org | sed 's/org\:[ ]*//g')
-# space_name=$(ibmcloud cf t | grep space | sed 's/space\:[ ]*//g')
-prod_region=$(ibmcloud target | grep Region | sed -E 's/.+:[ ]*([^ ]*)[ ]*/\1/g'  | sed -E 's/(.+)/ibm:yp:\1/g')
+#### MAIN ####
 
-host="https://cloud.ibm.com"
-
-# env_id="ibm:yp:us-south"
-#env_id="ibm:yp:eu-de"
-# env_id="ibm:yp:us-east"
-env_id="${prod_region}"
-
-if [ -z "${TOOLCHAIN_ID}" ]; then 
-  # TOOLCHAIN_ID="35cec4f7-d7a3-4bf0-b249-73668fb3bb22"
-  echo "TOOLCHAIN_ID not detected"
+TOOLCHAIN_URL=$1
+if [ -z "${TOOLCHAIN_URL}" ]; then 
+  echo "Missing Toolchain URL argument"
   exit 1 
 fi
 
-if [ -z "${prod_region}" ]; then 
-  echo "Region not detected"
-  exit 1 
-fi
-
-
-url="${host}/devops/toolchains/${TOOLCHAIN_ID}?env_id=${env_id}&isUIRequest=true"
-
-echo "Toolchain url is: $url"
+FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}&isUIRequest=true"
+echo "Toolchain url is: $FULL_TOOLCHAIN_URL"
+BEARER_TOKEN=$(ibmcloud iam oauth-tokens | head -1 | sed 's/.*:[ \t]*//')
 
 OLD_TOOLCHAIN_JSON=$(curl \
-  -H "Authorization: ${token}" \
+  -H "Authorization: ${BEARER_TOKEN}" \
   -H "Accept: application/json" \
   -H "include: everything" \
-  "${url}")
+  "${FULL_TOOLCHAIN_URL}")
 
 SERVICE_BROKERS=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.services | { "service_brokers": . }' )
 OLD_TOOLCHAIN_JSON=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.toolchain' )
-
+REGION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.region_id' | sed 's/.*[:]//')
+PIPELINE_API_URL="https://pipeline-service.${REGION}.devops.cloud.ibm.com/pipeline"
 # echo "SERVICE_BROKERS is: ${SERVICE_BROKERS}"
 # echo "OLD_TOOLCHAIN_JSON is: ${OLD_TOOLCHAIN_JSON}"
+
+TIMESTAMP=$(date +'%Y-%m-%dT%H-%M-%S')
+WORKDIR=work-${TIMESTAMP}
+mkdir $WORKDIR
+cd $WORKDIR
 
 OLD_TOOLCHAIN_JSON_FILE="tmp.old_toolchain.json"
 echo "${OLD_TOOLCHAIN_JSON}" > "${OLD_TOOLCHAIN_JSON_FILE}"
 
 TOOLCHAIN_NAME=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.name' )
+
 TEMPLATE_NAME=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.template.name' || '' )
 TOOLCHAIN_DESCRIPTION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.description' || '' )
 
-TIMESTAMP=$(date +'%Y-%m-%dT%H-%M-%S')
 TOOLCHAIN_YML_FILE_NAME="toolchain_${TIMESTAMP}.yml"
 
 echo "about to generate ${TOOLCHAIN_YML_FILE_NAME}"
@@ -160,11 +249,8 @@ do
 
     if [ 'pipeline' = "${SERVICE_ID}"  ] ; then
         # if pipeline, extra work
-        export SOURCE_PIPELINE_ID="${SERVICE_INSTANCE_ID}"
-        export TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
-        export INPUT_REPO_SERVICES_DETAILS="${REPO_DETAILS}"
-
-        ./download_pipeline.sh
+        TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
+        download_pipeline "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}"
 
         PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
         PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
@@ -259,9 +345,7 @@ PIPELINE_FILE_NAMES=$( echo "${PIPELINE_FILE_NAMES}" | sed -E 's/,//' )
 echo "Output ${TOOLCHAIN_YML_FILE_NAME} file."
 # cat "${TOOLCHAIN_YML_FILE_NAME}"
 
-mkdir "toolchain-${TIMESTAMP}"
-cd "toolchain-${TIMESTAMP}" || exit 1
-
+cd ..
 cat >> "README.md" << EOF
 # ${TOOLCHAIN_NAME}
 
@@ -273,16 +357,16 @@ mkdir ".bluemix"
 
 cd ".bluemix" || exit 1
 
-cp "../../${TOOLCHAIN_YML_FILE_NAME}" "./toolchain.yml"
+cp "../${WORKDIR}/${TOOLCHAIN_YML_FILE_NAME}" "./toolchain.yml"
 
 echo "${PIPELINE_FILE_NAMES}" | tr "," "\n" |\
 while IFS=$'\n\r' read -r pipeline_file_name 
 do
   echo "copy pipeline file: ${pipeline_file_name}"
-  cp "../../${pipeline_file_name}" "."
+  cp "../${WORKDIR}/${pipeline_file_name}" "."
 done
 
 cd ..
-cd ..
-
-echo "done - output in folder toolchain-${TIMESTAMP}"
+set +x
+if [ -z "${DEBUG_TTT}" ]; then rm -rf ${WORKDIR} ; fi
+echo "done"
