@@ -5,14 +5,13 @@ The toolchain-to-template script takes a Toolchain URL and will generate an OTC 
 ./toolchain-to-template.sh https://cloud.ibm.com/devops/toolchains/2665ce98-ea71-43e8-b723-19bafdb7a541?env_id=ibm:yp:us-east`
 ```
 
-
 ---
 ### SETUP
-0) These script requires that the following utilities are pre-installed on your PATH: ibmcloud, cURL, jq (https://stedolan.github.io/jq/), and yq (https://github.com/mikefarah/yq) 
-1) Create a temporary work folder to use to generate your template
-2) Download and copy `toolchain-to-template.sh` to your work folder
-3) Use ibmcloud CLI to login to the account where your toolchain resides
-4) Visit your Toolchain in the browser and copy the URL
+1) The toolchain-to-template.sh script requires that the following utilities are pre-installed on your PATH: ibmcloud, curl, jq (https://stedolan.github.io/jq/), and yq (https://github.com/mikefarah/yq) 
+2) Create a temporary work folder where the script will generate your template
+3) Download and copy `toolchain-to-template.sh` to your work folder
+4) Use ibmcloud CLI to login to the account where your toolchain resides
+5) Visit your Toolchain in the browser and copy the URL
 
 ### RUN THE SCRIPT
 In a shell run the following: `./toolchain-to-template.sh https://your-toolchain-url`
@@ -24,4 +23,4 @@ e.g https://cloud.ibm.com/devops/setup/deploy?env_id=ibm:yp:us-south&repository=
 
 (Note: if your repository is private add "&repository_token=your_git_access_token")
 
-Open that URL in a browser and click "Create" and you will have a newly minted clone of your original toolchain
+Open the Setup/Deploy URL in a browser and click "Create" and the template will produce a newly minted clone of your original toolchain.
