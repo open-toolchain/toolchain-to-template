@@ -349,7 +349,7 @@ cd ..
 cat >> "README.md" << EOF
 # ${TOOLCHAIN_NAME}
 
-Generated from toolchain id: ${TOOLCHAIN_ID}  
+Generated from toolchain URL: ${TOOLCHAIN_URL}  
 on ${TIMESTAMP}
 EOF
 
