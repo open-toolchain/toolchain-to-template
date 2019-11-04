@@ -285,7 +285,7 @@ do
 
     # suppress the value of any type:password parameter
     echo "${SERVICE_BROKERS}" |  jq -r  --arg service_id "${SERVICE_ID}" \
-      '.service_brokers[] | select( .entity.unique_id == $service_id ) | .metadata.parameters.properties | keys[] | . ' |\
+      '.service_brokers[] | select( .entity.unique_id == $service_id and .metadata.parameters.properties ) | .metadata.parameters.properties | keys[] | . ' |\
     while IFS=$'\n\r' read -r property_name 
     do
       PROPERTY_TYPE=$( echo "${SERVICE_BROKERS}" |  jq -r  --arg service_id "${SERVICE_ID}" --arg property_name "${property_name}" \
