@@ -48,7 +48,7 @@ jq 'del(. | .hooks)' $SOURCE_PIPELINE_ID.json | jq 'del(.stages[] | .worker)' > 
 
 # add the input service 
 ## Add the token url
-jq -r '.stages[] | select( .inputs[0].type=="git") | .inputs[0].url' $SOURCE_PIPELINE_ID.json |\
+jq -r '.stages[] | select( .inputs and .inputs[0].type=="git") | .inputs[0].url' $SOURCE_PIPELINE_ID.json |\
 while IFS=$'\n\r' read -r input_gitrepo 
 do
   # token_url=$(cat "${SOURCE_PIPELINE_ID}_inputsources.json" | jq -r --arg git_repo "$input_gitrepo" '.[] | select( .repo_url==$git_repo ) | .token_url')
@@ -89,7 +89,7 @@ done
 
 # remove the input url
 cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
-jq -r 'del( .stages[] | .inputs[] | select( .type == "git" ) | .url )' tmp-$TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.json
+jq -r 'del( .stages[] | select( .inputs ) | .inputs[] | select( .type == "git" ) | .url )' tmp-$TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.json
 
 # Add the pipeline properties in the target
 cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
@@ -213,9 +213,13 @@ REPO_DETAILS=$( echo "${SERVICE_DETAILS}" | grep --invert-match " null$" | sed -
 # template:
 #   required:
 #   - sample-repo
-echo "${REPO_DETAILS}" | sed -E 's/([^ ]+) .+/- \1/' \
- | yq prefix - "template.required" \
- | yq merge --inplace "${TOOLCHAIN_YML_FILE_NAME}" -
+if [ "${REPO_DETAILS}" ] ; then
+  echo "${REPO_DETAILS}" | sed -E 's/([^ ]+) .+/- \1/' \
+  | yq prefix - "template.required" \
+  | yq merge --inplace "${TOOLCHAIN_YML_FILE_NAME}" -
+else
+  echo "WARNING, no repository tool found, so not marked required, browser will give error for template with no required service."
+fi
 
 PIPELINE_FILE_NAMES=""
 
@@ -272,15 +276,17 @@ do
         #     services:
         #     - sample-repo
         #     name: simple-toolchain-20191016105909826
-        SERVICES_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_services.yml"
-        yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
+        SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
           | grep --invert-match " null$" \
           | sed -E 's/- - /- /' \
-          | sort --unique \
-          > "${SERVICES_LIST_FILE}"
-        yq prefix --inplace "${SERVICES_LIST_FILE}" "services"
-        yq merge --inplace "${SERVICE_FILE_NAME}" "${SERVICES_LIST_FILE}"
-        rm "${SERVICES_LIST_FILE}"
+          | sort --unique )
+        if [ "${SERVICES_LIST}" ] ; then
+          SERVICES_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_services.yml"
+          echo "${SERVICES_LIST}" > "${SERVICES_LIST_FILE}"
+          yq prefix --inplace "${SERVICES_LIST_FILE}" "services"
+          yq merge --inplace "${SERVICE_FILE_NAME}" "${SERVICES_LIST_FILE}"
+          rm "${SERVICES_LIST_FILE}"
+        fi
     fi
 
     # suppress the value of any type:password parameter
