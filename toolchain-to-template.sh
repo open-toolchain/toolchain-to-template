@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# set -x
 # The toolchain-to-template script takes a Toolchain URL and will generate an OTC Template that when run creates a clone
 # of you original toolchain.
 #
@@ -132,7 +132,7 @@ fi
 
 FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}&isUIRequest=true"
 echo "Toolchain url is: $FULL_TOOLCHAIN_URL"
-BEARER_TOKEN=$(ibmcloud iam oauth-tokens | head -1 | sed 's/.*:[ \t]*//')
+BEARER_TOKEN=$(ibmcloud iam oauth-tokens --output JSON | jq -r '.iam_token')
 
 OLD_TOOLCHAIN_JSON=$(curl \
   -H "Authorization: ${BEARER_TOKEN}" \
@@ -163,14 +163,10 @@ TOOLCHAIN_DESCRIPTION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.description' || 
 TOOLCHAIN_YML_FILE_NAME="toolchain_${TIMESTAMP}.yml"
 
 echo "about to generate ${TOOLCHAIN_YML_FILE_NAME}"
-cat >> "${TOOLCHAIN_YML_FILE_NAME}" << EOF
-version: '2'
-template:
-  name: '${TEMPLATE_NAME}'
-  description: '${TOOLCHAIN_DESCRIPTION}'
-toolchain:
-  name: '${TOOLCHAIN_NAME}'
-EOF
+echo "version: 2" > "${TOOLCHAIN_YML_FILE_NAME}"
+yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" template.name "${TEMPLATE_NAME}"
+yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" template.description "${TOOLCHAIN_DESCRIPTION}"
+yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" toolchain.name "${TOOLCHAIN_NAME}"
 
 SERVICE_DETAILS=""
 NEWLINE=$'\n'
