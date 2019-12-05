@@ -135,6 +135,7 @@ echo "Toolchain url is: $FULL_TOOLCHAIN_URL"
 BEARER_TOKEN=$(ibmcloud iam oauth-tokens --output JSON | jq -r '.iam_token')
 
 OLD_TOOLCHAIN_JSON=$(curl \
+  --fail --show-error --verbose\
   -H "Authorization: ${BEARER_TOKEN}" \
   -H "Accept: application/json" \
   -H "include: everything" \
