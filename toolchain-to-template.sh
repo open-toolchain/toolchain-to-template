@@ -130,9 +130,16 @@ if [ -z "${TOOLCHAIN_URL}" ]; then
   exit 1 
 fi
 
-FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}&isUIRequest=true"
+# &isUIRequest=true
+FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}"
 echo "Toolchain url is: $FULL_TOOLCHAIN_URL"
-BEARER_TOKEN=$(ibmcloud iam oauth-tokens --output JSON | jq -r '.iam_token')
+# old, token for public cloud:
+# BEARER_TOKEN=$(ibmcloud iam oauth-tokens --output JSON | jq -r '.iam_token')
+# TODO detect, if 401 Not Authorized returned, try using cf auth-token instead.
+# Note cf installer downloaded from: 
+# https://github.com/cloudfoundry/cli#installers-and-compressed-binaries
+# because the mac homebrew installation gave an error.
+BEARER_TOKEN=$(cf oauth-token | grep bearer)
 
 OLD_TOOLCHAIN_JSON=$(curl \
   --fail --show-error --verbose\
@@ -141,8 +148,9 @@ OLD_TOOLCHAIN_JSON=$(curl \
   -H "include: everything" \
   "${FULL_TOOLCHAIN_URL}")
 
-SERVICE_BROKERS=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.services | { "service_brokers": . }' )
-OLD_TOOLCHAIN_JSON=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.toolchain' )
+# SERVICE_BROKERS=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.services | { "service_brokers": . }' )
+# OLD_TOOLCHAIN_JSON=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.toolchain' )
+SERVICE_BROKERS=$( echo "[]" | jq -r '. | { "service_brokers": . }' )
 REGION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.region_id' | sed 's/.*[:]//')
 PIPELINE_API_URL="https://pipeline-service.${REGION}.devops.cloud.ibm.com/pipeline"
 # echo "SERVICE_BROKERS is: ${SERVICE_BROKERS}"
