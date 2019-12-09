@@ -114,7 +114,7 @@ echo "$TARGET_PIPELINE_ID.yml generated"
 
 # echoing the secured properties (pipeline and stage) that can not be valued there
 echo "The following pipeline secure properties needs to be updated with appropriate values:"
-jq -r '.properties[] | select(.type=="secure") | .name' ${TARGET_PIPELINE_ID}.json
+jq -r 'select(.properties != null) | .properties[] | select(.type=="secure") | .name' ${TARGET_PIPELINE_ID}.json
 
 echo "The following stage secure properties needs to be updated with appropriate values:"
 jq -r '.stages[] | . as $stage | .properties // [] | .[] | select(.type=="secure") | [$stage.name] + [.name] | join(" - ")' ${TARGET_PIPELINE_ID}.json
@@ -151,8 +151,12 @@ OLD_TOOLCHAIN_JSON=$(curl \
 # SERVICE_BROKERS=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.services | { "service_brokers": . }' )
 # OLD_TOOLCHAIN_JSON=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.toolchain' )
 SERVICE_BROKERS=$( echo "[]" | jq -r '. | { "service_brokers": . }' )
-REGION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.region_id' | sed 's/.*[:]//')
-PIPELINE_API_URL="https://pipeline-service.${REGION}.devops.cloud.ibm.com/pipeline"
+#  Note on dedicated, no region_id and domain prefix is different
+# REGION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.region_id' | sed 's/.*[:]//')
+# PIPELINE_API_URL="https://pipeline-service.${REGION}.devops.cloud.ibm.com/pipeline"
+DEDICATED_DOMAIN=$(echo "${TOOLCHAIN_URL}" | sed -E 's~https://console.([^/]*)/devops.*~\1~')
+# like https://otc-pipeline-server.dys0.bluemix.net/pipeline
+PIPELINE_API_URL="https://otc-pipeline-server.${DEDICATED_DOMAIN}/pipeline"
 # echo "SERVICE_BROKERS is: ${SERVICE_BROKERS}"
 # echo "OLD_TOOLCHAIN_JSON is: ${OLD_TOOLCHAIN_JSON}"
 
