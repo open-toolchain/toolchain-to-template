@@ -145,7 +145,7 @@ function download_tekton_pipeline() {
     echo "Service $INPUT_REPO_SERVICE_NAME (refers to)-> $input_gitrepo"
 
     # change the input url to the corresponding service reference
-    jq -r -c --arg input_gitrepo "$input_gitrepo"  --arg repo_service "${INPUT_REPO_SERVICE_NAME}" \
+    jq -r -c --arg input_gitrepo "$input_gitrepo"  --arg repo_service "\${${INPUT_REPO_SERVICE_NAME}}" \
       '.inputs[] | if ( .type=="git" and .url==$input_gitrepo) then .=( del(.url) + { "service": $repo_service }) else . end' \
       tmp-$TARGET_PIPELINE_ID.json > inputs-${TARGET_PIPELINE_ID}.json
     
@@ -288,6 +288,9 @@ do
     # Start with service parameters list:
     echo "${SERVICE_PARAMETERS}" > "${SERVICE_FILE_NAME}"
 
+    # Delete initial configuration content for the service 
+    yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.content"
+
     if [ 'pipeline' = "${SERVICE_ID}"  ] ; then
         # if pipeline, extra work
         PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq read - type)
@@ -308,8 +311,6 @@ do
           if [ 'null' != "${FOUND_EXECUTE}" ]; then
             yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.execute"
           fi
-          yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.content"
-          yq write --inplace "${SERVICE_FILE_NAME}" "configuration.content.\$text" "${PIPELINE_FILE_NAME}"
 
           SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
             | grep --invert-match " null$" \
@@ -329,14 +330,29 @@ do
           PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
           PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
 
+          # Recreate a service list removing the ${} corresponding to an env definition
           SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' \
             | grep --invert-match " null$" \
             | sed -E 's/- - /- /' \
+            | awk -F{ '{print $2}' \
+            | awk -F} '{print "- "$1}' \
             | sort --unique )
+
+          # Insert env entry for each of the service
+          if [ "${SERVICES_LIST}" ] ; then
+            ENV_SERVICES_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
+            echo "${SERVICES_LIST}" > "${ENV_SERVICES_LIST_FILE}"
+            yq prefix --inplace "${ENV_SERVICES_LIST_FILE}" "configuration.env"
+            yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_SERVICES_LIST_FILE}"
+            rm "${ENV_SERVICES_LIST_FILE}"
+          fi
 
         else
           echo "WARNING, unknown pipeline type $PIPELINE_TYPE for instance $SERVICE_INSTANCE_ID"
         fi
+
+        # Insert the reference to pipeline content file in the pipeline service definition
+        yq write --inplace "${SERVICE_FILE_NAME}" "configuration.content.\$text" "${PIPELINE_FILE_NAME}"
 
         # Insert services list into parameters, like:
         #   service_id: pipeline
