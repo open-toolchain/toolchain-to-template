@@ -340,11 +340,18 @@ do
 
           # Insert env entry for each of the service
           if [ "${SERVICES_LIST}" ] ; then
-            ENV_SERVICES_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
-            echo "${SERVICES_LIST}" > "${ENV_SERVICES_LIST_FILE}"
-            yq prefix --inplace "${ENV_SERVICES_LIST_FILE}" "configuration.env"
-            yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_SERVICES_LIST_FILE}"
-            rm "${ENV_SERVICES_LIST_FILE}"
+            # Recreate an env entries list for each of the services
+            ENV_ENTRY_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' \
+              | grep --invert-match " null$" \
+              | sed -E 's/- - /- /' \
+              | awk -F{ '{print $2}' \
+              | awk -F} '{print "- "$1": "$1}' \
+              | sort --unique )
+            ENV_ENTRY_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
+            echo "${ENV_ENTRY_LIST}" > "${ENV_ENTRY_LIST_FILE}"
+            yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
+            yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            rm "${ENV_ENTRY_LIST_FILE}"
           fi
 
         else
