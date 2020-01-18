@@ -31,8 +31,8 @@ function download_classic_pipeline() {
 
   #local PIPELINE_API_URL="https://pipeline-service.${REGION}.devops.cloud.ibm.com/pipeline"
 
-  echo "about to do: curl -H Accept: application/x-yaml ${PIPELINE_API_URL}"
-  curl -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}"
+  echo "Get classic pipeline content: curl -H Accept: application/x-yaml ${PIPELINE_API_URL}"
+  curl -s -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}"
 
   # echo "YAML from source classic pipeline"
   # cat "${SOURCE_PIPELINE_ID}.yaml"
@@ -53,7 +53,7 @@ function download_classic_pipeline() {
     cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
 
     INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}" | sed -E 's/([^ ]+) .+/\1/' )
-    echo "service for repo url: $INPUT_REPO_SERVICE_NAME : $input_gitrepo"
+    echo "Service $INPUT_REPO_SERVICE_NAME (refers to)-> $input_gitrepo"
 
       # '.stages[] | if ( .inputs[0].type=="git" and .inputs[0].url==$input_gitrepo) then  .inputs[0]=(.inputs[0] + { "service": $repo_service }) else . end' \
     jq -r --arg input_gitrepo "$input_gitrepo"  --arg repo_service "${INPUT_REPO_SERVICE_NAME}" \
@@ -93,7 +93,7 @@ function download_classic_pipeline() {
   # yq r $TARGET_PIPELINE_ID.json | tee $TARGET_PIPELINE_ID.yaml
   yq r $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
 
-  echo "$TARGET_PIPELINE_ID.yml generated"
+  echo "Classic pipeline content generated: $TARGET_PIPELINE_ID.yml"
   # echo "==="
   # cat "$TARGET_PIPELINE_ID.yml"
   # echo "==="
@@ -114,31 +114,51 @@ function download_tekton_pipeline() {
   local TARGET_PIPELINE_ID=$3
   local INPUT_REPO_SERVICES_DETAILS=$4
 
-  echo "about to do: curl -H Accept: application/x-yaml ${PIPELINE_API_URL}"
-  curl -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}"
+  echo "Get tekton pipeline content: curl -H Accept: application/x-yaml ${PIPELINE_API_URL}"
+  curl -s -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}"
 
-  echo "YAML from source tekton pipeline"
-  echo "==="
-  cat "${SOURCE_PIPELINE_ID}.yaml"
-  echo "==="
+  #echo "YAML from source tekton pipeline"
+  #echo "==="
+  #cat "${SOURCE_PIPELINE_ID}.yaml"
+  #echo "==="
 
   # convert the yaml to json 
   # yq r -j ${SOURCE_PIPELINE_ID}.yaml | tee ${SOURCE_PIPELINE_ID}.json
   yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
 
-  #######
   cp ${SOURCE_PIPELINE_ID}.json ${TARGET_PIPELINE_ID}.json
-  # Work here !
-  # Rename envProperties to properties
+
   # For each properties, make the type lowercase
-  #######
+  jq -c '.envProperties[] | .type |= ascii_downcase' ${TARGET_PIPELINE_ID}.json > properties-${TARGET_PIPELINE_ID}.json  
+  # Delete envProperties in favor to properties
+  cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+  jq --slurpfile props properties-${TARGET_PIPELINE_ID}.json '. | .properties=$props | del(.envProperties)' tmp-${TARGET_PIPELINE_ID}.json > ${TARGET_PIPELINE_ID}.json
+
+  # add the input service(s) 
+  jq -r '.inputs[] | select(.type=="git") | .url' $SOURCE_PIPELINE_ID.json |\
+  while IFS=$'\n\r' read -r input_gitrepo 
+  do
+    # add service for each git input
+    cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+
+    INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}" | sed -E 's/([^ ]+) .+/\1/' )
+    echo "Service $INPUT_REPO_SERVICE_NAME (refers to)-> $input_gitrepo"
+
+    # change the input url to the corresponding service reference
+    jq -r -c --arg input_gitrepo "$input_gitrepo"  --arg repo_service "${INPUT_REPO_SERVICE_NAME}" \
+      '.inputs[] | if ( .type=="git" and .url==$input_gitrepo) then .=( del(.url) + { "service": $repo_service }) else . end' \
+      tmp-$TARGET_PIPELINE_ID.json > inputs-${TARGET_PIPELINE_ID}.json
+    
+    jq --slurpfile inputs inputs-${TARGET_PIPELINE_ID}.json '.inputs=$inputs' tmp-$TARGET_PIPELINE_ID.json > ${TARGET_PIPELINE_ID}.json
+
+  done
 
   yq r $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
 
-  echo "$TARGET_PIPELINE_ID.yml generated"
-  echo "==="
-  cat "$TARGET_PIPELINE_ID.yml"
-  echo "==="
+  echo "Tekton pipeline content generated: $TARGET_PIPELINE_ID.yml"
+  #echo "==="
+  #cat "$TARGET_PIPELINE_ID.yml"
+  #echo "==="
 }
 
 #### MAIN ####
@@ -153,7 +173,7 @@ FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}&isUIRequest=true"
 echo "Toolchain url is: $FULL_TOOLCHAIN_URL"
 BEARER_TOKEN=$(ibmcloud iam oauth-tokens --output JSON | jq -r '.iam_token')
 
-OLD_TOOLCHAIN_JSON=$(curl \
+OLD_TOOLCHAIN_JSON=$(curl -s \
   -H "Authorization: ${BEARER_TOKEN}" \
   -H "Accept: application/json" \
   -H "include: everything" \
@@ -180,7 +200,7 @@ TOOLCHAIN_DESCRIPTION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.description' || 
 
 TOOLCHAIN_YML_FILE_NAME="toolchain_${TIMESTAMP}.yml"
 
-echo "about to generate ${TOOLCHAIN_YML_FILE_NAME}"
+echo "Generating ${TOOLCHAIN_YML_FILE_NAME}"
 echo "version: 2" > "${TOOLCHAIN_YML_FILE_NAME}"
 yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" template.name "${TEMPLATE_NAME}"
 yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" template.description "${TOOLCHAIN_DESCRIPTION}"
@@ -291,23 +311,11 @@ do
           yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.content"
           yq write --inplace "${SERVICE_FILE_NAME}" "configuration.content.\$text" "${PIPELINE_FILE_NAME}"
 
-          # Insert services list into parameters, like:
-          #   service_id: pipeline
-          #   parameters:
-          #     services:
-          #     - sample-repo
-          #     name: simple-toolchain-20191016105909826
           SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
             | grep --invert-match " null$" \
             | sed -E 's/- - /- /' \
             | sort --unique )
-          if [ "${SERVICES_LIST}" ] ; then
-            SERVICES_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_services.yml"
-            echo "${SERVICES_LIST}" > "${SERVICES_LIST_FILE}"
-            yq prefix --inplace "${SERVICES_LIST_FILE}" "services"
-            yq merge --inplace "${SERVICE_FILE_NAME}" "${SERVICES_LIST_FILE}"
-            rm "${SERVICES_LIST_FILE}"
-          fi
+
         elif [ "tekton" == "$PIPELINE_TYPE" ]; then
           # if tekton pipeline, extra work
           SERVICE_DASHBOARD_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].dashboard_url")
@@ -321,9 +329,29 @@ do
           PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
           PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
 
+          SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' \
+            | grep --invert-match " null$" \
+            | sed -E 's/- - /- /' \
+            | sort --unique )
+
         else
           echo "WARNING, unknown pipeline type $PIPELINE_TYPE for instance $SERVICE_INSTANCE_ID"
         fi
+
+        # Insert services list into parameters, like:
+        #   service_id: pipeline
+        #   parameters:
+        #     services:
+        #     - sample-repo
+        #     name: simple-toolchain-20191016105909826
+        if [ "${SERVICES_LIST}" ] ; then
+          SERVICES_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_services.yml"
+          echo "${SERVICES_LIST}" > "${SERVICES_LIST_FILE}"
+          yq prefix --inplace "${SERVICES_LIST_FILE}" "services"
+          yq merge --inplace "${SERVICE_FILE_NAME}" "${SERVICES_LIST_FILE}"
+          rm "${SERVICES_LIST_FILE}"
+        fi
+
     fi
 
     # suppress the value of any type:password parameter
@@ -405,11 +433,11 @@ cp "../${WORKDIR}/${TOOLCHAIN_YML_FILE_NAME}" "./toolchain.yml"
 echo "${PIPELINE_FILE_NAMES}" | tr "," "\n" |\
 while IFS=$'\n\r' read -r pipeline_file_name 
 do
-  echo "copy pipeline file: ${pipeline_file_name}"
+  echo "Copy pipeline file: ${pipeline_file_name}"
   cp "../${WORKDIR}/${pipeline_file_name}" "."
 done
 
 cd ..
 set +x
 if [ -z "${DEBUG_TTT}" ]; then rm -rf ${WORKDIR} ; fi
-echo "done"
+echo "Template extraction from toolchain '${TOOLCHAIN_NAME}' done"
