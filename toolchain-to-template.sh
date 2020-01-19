@@ -129,10 +129,13 @@ function download_tekton_pipeline() {
   jq 'del(.private_worker)' $SOURCE_PIPELINE_ID.json > "${TARGET_PIPELINE_ID}.json"
 
   # For each properties, make the type lowercase
-  jq -c '.envProperties[] | .type |= ascii_downcase' ${TARGET_PIPELINE_ID}.json > properties-${TARGET_PIPELINE_ID}.json  
-  # Delete envProperties in favor to properties
-  cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
-  jq --slurpfile props properties-${TARGET_PIPELINE_ID}.json '. | .properties=$props | del(.envProperties)' tmp-${TARGET_PIPELINE_ID}.json > ${TARGET_PIPELINE_ID}.json
+  if jq -e -c '.envProperties' ${TARGET_PIPELINE_ID}.json> /dev/null 2>&1; then
+    echo "Converting envProperties to properties (lowercase type)"
+    jq -c '.envProperties[] | .type |= ascii_downcase' ${TARGET_PIPELINE_ID}.json > properties-${TARGET_PIPELINE_ID}.json  
+    # Delete envProperties in favor to properties
+    cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+    jq --slurpfile props properties-${TARGET_PIPELINE_ID}.json '. | .properties=$props | del(.envProperties)' tmp-${TARGET_PIPELINE_ID}.json > ${TARGET_PIPELINE_ID}.json
+  fi
 
   # add the input service(s) 
   jq -r '.inputs[] | select(.type=="git") | .url' $SOURCE_PIPELINE_ID.json |\
@@ -293,6 +296,9 @@ do
     # Delete initial configuration content for the service 
     yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.content"
 
+    # Delete initial configuration env for the service 
+    yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.env"
+
     if [ 'pipeline' = "${SERVICE_ID}"  ] ; then
         # if pipeline, extra work
         PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq read - type)
@@ -323,7 +329,7 @@ do
           # if tekton pipeline, extra work
           SERVICE_DASHBOARD_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].dashboard_url")
           SERVICE_REGION_ID=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].region_id")
-          PIPELINE_EXTERNAL_API_URL="$(echo $TOOLCHAIN_URL | awk -F/ '{print $1"//"$3}')/${SERVICE_DASHBOARD_URL}/yaml?env_id=${SERVICE_REGION_ID}"
+          PIPELINE_EXTERNAL_API_URL="$(echo $TOOLCHAIN_URL | awk -F/ '{print $1"//"$3}')${SERVICE_DASHBOARD_URL}/yaml?env_id=${SERVICE_REGION_ID}"
 
           TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
 
@@ -347,7 +353,7 @@ do
               | grep --invert-match " null$" \
               | sed -E 's/- - /- /' \
               | awk -F{ '{print $2}' \
-              | awk -F} '{print "- "$1": "$1}' \
+              | awk -F} '{print $1": "$1}' \
               | sort --unique )
             ENV_ENTRY_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
             echo "${ENV_ENTRY_LIST}" > "${ENV_ENTRY_LIST_FILE}"
