@@ -70,7 +70,6 @@ function download_classic_pipeline() {
   #     type: git
   # to have:
   #   - events: '{"push":true}'
-
   jq -r '.stages[] | select( .triggers[0].type=="git" and .triggers[0].events == null ) | .name ' $SOURCE_PIPELINE_ID.json |\
   while IFS=$'\n\r' read -r stage_name 
   do
@@ -126,7 +125,8 @@ function download_tekton_pipeline() {
   # yq r -j ${SOURCE_PIPELINE_ID}.yaml | tee ${SOURCE_PIPELINE_ID}.json
   yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
 
-  cp ${SOURCE_PIPELINE_ID}.json ${TARGET_PIPELINE_ID}.json
+  # Remove (temporary workaround) the workers definition 
+  jq 'del(.private_worker)' $SOURCE_PIPELINE_ID.json > "${TARGET_PIPELINE_ID}.json"
 
   # For each properties, make the type lowercase
   jq -c '.envProperties[] | .type |= ascii_downcase' ${TARGET_PIPELINE_ID}.json > properties-${TARGET_PIPELINE_ID}.json  
@@ -228,8 +228,10 @@ do
     # webide
     SERVICE_NAME=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].toolchain_binding.name")
     if [ 'null' = "${SERVICE_NAME}"  ] ; then
+       # some service do not have toolchainbinding name such as private worker
+       # add the service id as the suffix to prevent collision/override
         PREFIX_NUM=$( echo "0${i}" | sed -E 's/0*(.*..)$/\1/' )
-        SERVICE_NAME="service${PREFIX_NUM}"
+        SERVICE_NAME="${SERVICE_ID}${PREFIX_NUM}"
     fi
 
     REPO_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].parameters.repo_url")
@@ -237,8 +239,8 @@ do
     SERVICE_DETAILS="${SERVICE_DETAILS}${NEWLINE}${SERVICE_INSTANCE_ID} ${SERVICE_NAME} ${REPO_URL}"
 done
 
-# echo "SERVICE_DETAILS is: ${NEWLINE}${SERVICE_DETAILS}"
-# echo "SERVICE_DETAILS end"
+#echo "SERVICE_DETAILS is: ${NEWLINE}${SERVICE_DETAILS}"
+#echo "SERVICE_DETAILS end"
 
 # REPO_DETAILS lines are like ${SERVICE_NAME} ${REPO_URL}
 REPO_DETAILS=$( echo "${SERVICE_DETAILS}" | grep --invert-match " null$" | sed -E 's/[^ ]+ ([^ ]+) (.+)/\1 \2/' )
