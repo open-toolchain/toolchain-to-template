@@ -301,31 +301,8 @@ do
 
     if [ 'pipeline' = "${SERVICE_ID}"  ] ; then
         # if pipeline, extra work
-        PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq read - type)
-        if [ "classic" == "$PIPELINE_TYPE" ]; then
-          # if classic pipeline, extra work
-          PIPELINE_EXTERNAL_API_URL=$(echo "$SERVICE_PARAMETERS" | yq read - external_api_url)
-          TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
-          download_classic_pipeline "${PIPELINE_EXTERNAL_API_URL}" "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}"
-
-          PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
-          PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
-
-          FOUND_API_KEY=$( yq read "${SERVICE_FILE_NAME}" 'configuration.env.API_KEY' )
-          if [ 'null' != "${FOUND_API_KEY}" ]; then
-            yq write --inplace "${SERVICE_FILE_NAME}" "configuration.env.API_KEY" ""
-          fi
-          FOUND_EXECUTE=$( yq read "${SERVICE_FILE_NAME}" 'configuration.execute' )
-          if [ 'null' != "${FOUND_EXECUTE}" ]; then
-            yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.execute"
-          fi
-
-          SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
-            | grep --invert-match " null$" \
-            | sed -E 's/- - /- /' \
-            | sort --unique )
-
-        elif [ "tekton" == "$PIPELINE_TYPE" ]; then
+        PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq read - type)        
+        if [ "tekton" == "$PIPELINE_TYPE" ]; then
           # if tekton pipeline, extra work
           SERVICE_DASHBOARD_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].dashboard_url")
           SERVICE_REGION_ID=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].region_id")
@@ -361,9 +338,28 @@ do
             yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             rm "${ENV_ENTRY_LIST_FILE}"
           fi
+        else 
+          # default to classic pipeline extra work
+          PIPELINE_EXTERNAL_API_URL=$(echo "$SERVICE_PARAMETERS" | yq read - external_api_url)
+          TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
+          download_classic_pipeline "${PIPELINE_EXTERNAL_API_URL}" "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}"
 
-        else
-          echo "WARNING, unknown pipeline type $PIPELINE_TYPE for instance $SERVICE_INSTANCE_ID"
+          PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
+          PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
+
+          FOUND_API_KEY=$( yq read "${SERVICE_FILE_NAME}" 'configuration.env.API_KEY' )
+          if [ 'null' != "${FOUND_API_KEY}" ]; then
+            yq write --inplace "${SERVICE_FILE_NAME}" "configuration.env.API_KEY" ""
+          fi
+          FOUND_EXECUTE=$( yq read "${SERVICE_FILE_NAME}" 'configuration.execute' )
+          if [ 'null' != "${FOUND_EXECUTE}" ]; then
+            yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.execute"
+          fi
+
+          SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
+            | grep --invert-match " null$" \
+            | sed -E 's/- - /- /' \
+            | sort --unique )
         fi
 
         # Insert the reference to pipeline content file in the pipeline service definition
