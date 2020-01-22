@@ -31,7 +31,7 @@ function download_classic_pipeline() {
 
   #local PIPELINE_API_URL="https://pipeline-service.${REGION}.devops.cloud.ibm.com/pipeline"
 
-  echo "Get classic pipeline content: curl -H Accept: application/x-yaml ${PIPELINE_API_URL}"
+  echo 'Get classic pipeline content: curl -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml" ' ${PIPELINE_API_URL}
   curl -s -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}"
 
   # echo "YAML from source classic pipeline"
@@ -113,13 +113,13 @@ function download_tekton_pipeline() {
   local TARGET_PIPELINE_ID=$3
   local INPUT_REPO_SERVICES_DETAILS=$4
 
-  echo "Get tekton pipeline content: curl -H Accept: application/x-yaml ${PIPELINE_API_URL}"
+  echo 'Get tekton pipeline content: curl -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"' ${PIPELINE_API_URL}
   curl -s -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}"
 
-  #echo "YAML from source tekton pipeline"
-  #echo "==="
-  #cat "${SOURCE_PIPELINE_ID}.yaml"
-  #echo "==="
+  # echo "YAML from source tekton pipeline"
+  # echo "==="
+  # cat "${SOURCE_PIPELINE_ID}.yaml"
+  # echo "==="
 
   # convert the yaml to json 
   # yq r -j ${SOURCE_PIPELINE_ID}.yaml | tee ${SOURCE_PIPELINE_ID}.json
@@ -247,18 +247,6 @@ done
 
 # REPO_DETAILS lines are like ${SERVICE_NAME} ${REPO_URL}
 REPO_DETAILS=$( echo "${SERVICE_DETAILS}" | grep --invert-match " null$" | sed -E 's/[^ ]+ ([^ ]+) (.+)/\1 \2/' )
-
-# under template, add the repo services as required:
-# template:
-#   required:
-#   - sample-repo
-if [ "${REPO_DETAILS}" ] ; then
-  echo "${REPO_DETAILS}" | sed -E 's/([^ ]+) .+/- \1/' \
-  | yq prefix - "template.required" \
-  | yq merge --inplace "${TOOLCHAIN_YML_FILE_NAME}" -
-else
-  echo "WARNING, no repository tool found, so not marked required, browser will give error for template with no required service."
-fi
 
 # DEBUG
 #yq read "${OLD_TOOLCHAIN_JSON_FILE}"
@@ -437,6 +425,22 @@ do
     yq merge --inplace "${TOOLCHAIN_YML_FILE_NAME}" "${SERVICE_FILE_NAME}" 
     rm "${SERVICE_FILE_NAME}"
 done
+
+# under template, add the required services
+# a required service is a service that other services depends on
+# template:
+#   required:
+#   - sample-repo
+#   - private-worker
+REQUIRED_SERVICES=$( yq read -j "${TOOLCHAIN_YML_FILE_NAME}" | jq -r '.services[] | .parameters | .services // [] | .[] | .' | sort -u )
+#echo "REQUIRED_SERVICES=$REQUIRED_SERVICES"
+if [ "${REQUIRED_SERVICES}" ] ; then
+  echo "${REQUIRED_SERVICES}" | awk '{print "- "$1}' \
+  | yq prefix - "template.required" \
+  | yq merge --inplace "${TOOLCHAIN_YML_FILE_NAME}" -
+else
+  echo "WARNING, no repository tool found, so not marked required, browser will give error for template with no required service."
+fi
 
 PIPELINE_FILE_NAMES=$( echo "${PIPELINE_FILE_NAMES}" | sed -E 's/,//' ) 
 
