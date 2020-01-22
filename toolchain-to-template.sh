@@ -28,6 +28,7 @@ function download_classic_pipeline() {
   local SOURCE_PIPELINE_ID=$2
   local TARGET_PIPELINE_ID=$3
   local INPUT_REPO_SERVICES_DETAILS=$4
+  local ALL_SERVICE_DETAILS=$5
 
   #local PIPELINE_API_URL="https://pipeline-service.${REGION}.devops.cloud.ibm.com/pipeline"
 
@@ -112,6 +113,7 @@ function download_tekton_pipeline() {
   local SOURCE_PIPELINE_ID=$2
   local TARGET_PIPELINE_ID=$3
   local INPUT_REPO_SERVICES_DETAILS=$4
+  local ALL_SERVICE_DETAILS=$5
 
   echo 'Get tekton pipeline content: curl -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"' ${PIPELINE_API_URL}
   curl -s -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}"
@@ -126,7 +128,26 @@ function download_tekton_pipeline() {
   yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
 
   # Remove (temporary workaround) the workers definition 
-  jq 'del(.private_worker)' $SOURCE_PIPELINE_ID.json > "${TARGET_PIPELINE_ID}.json"
+  #jq 'del(.private_worker)' $SOURCE_PIPELINE_ID.json > "${TARGET_PIPELINE_ID}.json"
+  # Find the privateworker service definition corresponding to the referenced privateworker
+  SPECIFIED_PW_NAME=$(jq -r '.private_worker' $SOURCE_PIPELINE_ID.json)
+  # echo "SPECIFIED_PW_NAME=$SPECIFIED_PW_NAME"
+  # echo "ALL_SERVICE_DETAILS=$ALL_SERVICE_DETAILS"
+  if [ -z "$SPECIFIED_PW_NAME" ]; then
+    jq 'del(.private_worker)' $SOURCE_PIPELINE_ID.json > "${TARGET_PIPELINE_ID}.json"
+  else
+    # Look for the specified PW in the service details
+    # If not found, then remove private worker definition to use a default one
+    # else keep the existing privateworker definition name that will be used at template instanciation
+    FOUND_PW_SERVICEID=$(echo "${ALL_SERVICE_DETAILS}" | grep -e "${SPECIFIED_PW_NAME}" -w | awk '{print $2}' )
+    if [ -z "$FOUND_PW_SERVICEID" ]; then
+      jq 'del(.private_worker)' $SOURCE_PIPELINE_ID.json > "${TARGET_PIPELINE_ID}.json"
+    else
+      # still use the privatewaorker name as this is what will be defined by the template instanciation
+      # no indirection thru an environment variable
+      jq --arg pw_serviceid '${'${FOUND_PW_SERVICEID}'}' '.private_worker=$pw_serviceid' $SOURCE_PIPELINE_ID.json > "${TARGET_PIPELINE_ID}.json"
+    fi
+  fi
 
   # For each properties, make the type lowercase
   if jq -e -c '.envProperties' ${TARGET_PIPELINE_ID}.json> /dev/null 2>&1; then
@@ -229,17 +250,22 @@ do
 
     # 'services[0].toolchain_binding.name' is like:
     # webide
-    SERVICE_NAME=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].toolchain_binding.name")
-    if [ 'null' = "${SERVICE_NAME}"  ] ; then
+    BINDING_NAME=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].toolchain_binding.name")
+    if [ 'null' = "${BINDING_NAME}"  ] ; then
        # some service do not have toolchainbinding name such as private worker
        # add the service id as the suffix to prevent collision/override
         PREFIX_NUM=$( echo "0${i}" | sed -E 's/0*(.*..)$/\1/' )
-        SERVICE_NAME="${SERVICE_ID}${PREFIX_NUM}"
+        BINDING_NAME="${SERVICE_ID}${PREFIX_NUM}"
+    fi
+
+    SERVICE_NAME=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].parameters.name")
+    if [ 'null' = "$SERVICE_NAME" ]; then
+      SERVICE_NAME="$BINDING_NAME"
     fi
 
     REPO_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].parameters.repo_url")
 
-    SERVICE_DETAILS="${SERVICE_DETAILS}${NEWLINE}${SERVICE_INSTANCE_ID} ${SERVICE_NAME} ${REPO_URL}"
+    SERVICE_DETAILS="${SERVICE_DETAILS}${NEWLINE}${SERVICE_INSTANCE_ID} ${BINDING_NAME} ${REPO_URL} ${SERVICE_NAME}"
 done
 
 #echo "SERVICE_DETAILS is: ${NEWLINE}${SERVICE_DETAILS}"
@@ -298,22 +324,34 @@ do
 
           TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
 
-          download_tekton_pipeline "${PIPELINE_EXTERNAL_API_URL}" "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}"
+          download_tekton_pipeline "${PIPELINE_EXTERNAL_API_URL}" "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}" "${SERVICE_DETAILS}"
 
           PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
           PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
 
-          # Recreate a service list removing the ${} corresponding to an env definition
-          SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' \
+          # Find the list of git services defined in the inputs section
+          GIT_SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' \
             | grep --invert-match " null$" \
             | sed -E 's/- - /- /' \
             | awk -F{ '{print $2}' \
             | awk -F} '{print "- "$1}' \
             | sort --unique )
 
-          # Insert env entry for each of the service
-          if [ "${SERVICES_LIST}" ] ; then
-            # Recreate an env entries list for each of the services
+          # Find the private worker service if needed
+          PRIVATE_WORKER_SERVICE=$(yq read "${PIPELINE_FILE_NAME}" 'private_worker')
+          if [ "$PRIVATE_WORKER_SERVICE" == "null" ]; then
+            PRIVATE_WORKER_SERVICE=""
+          else
+            # Remove the enclosing ${ } 
+            PRIVATE_WORKER_SERVICE=$(echo "$PRIVATE_WORKER_SERVICE" \
+              | awk -F{ '{print $2}' \
+              | awk -F} '{print $1}' )
+          fi
+          echo "PRIVATE_WORKER_SERVICE=$PRIVATE_WORKER_SERVICE"          
+          
+          # Insert env entry for each of the git service
+          if [ "${GIT_SERVICES_LIST}" ] ; then
+            # Recreate an env entries list for each of the git services
             ENV_ENTRY_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' \
               | grep --invert-match " null$" \
               | sed -E 's/- - /- /' \
@@ -326,11 +364,26 @@ do
             yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             rm "${ENV_ENTRY_LIST_FILE}"
           fi
+
+          # Insert env entry for the private worker service if needed
+          # and define the SERVICES_LIST accordingly
+          if [ "${PRIVATE_WORKER_SERVICE}" ]; then
+            ENV_ENTRY_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
+            echo "${PRIVATE_WORKER_SERVICE}: '{{services."${PRIVATE_WORKER_SERVICE}".parameters.name}}'" > "${ENV_ENTRY_LIST_FILE}"
+            yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
+            yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            rm "${ENV_ENTRY_LIST_FILE}"
+
+            SERVICES_LIST="${GIT_SERVICES_LIST}${NEWLINE}- ${PRIVATE_WORKER_SERVICE}"
+          else 
+            SERVICES_LIST="${GIT_SERVICES_LIST}"
+          fi
+
         else 
           # default to classic pipeline extra work
           PIPELINE_EXTERNAL_API_URL=$(echo "$SERVICE_PARAMETERS" | yq read - external_api_url)
           TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
-          download_classic_pipeline "${PIPELINE_EXTERNAL_API_URL}" "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}"
+          download_classic_pipeline "${PIPELINE_EXTERNAL_API_URL}" "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}" "${SERVICE_DETAILS}"
 
           PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
           PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
