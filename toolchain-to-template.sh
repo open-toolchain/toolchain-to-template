@@ -149,10 +149,10 @@ function download_tekton_pipeline() {
     fi
   fi
 
-  # For each properties, make the type lowercase
+  # For each properties, make the type lowercase expect SECURE that needs to be uppercased
   if jq -e -c '.envProperties' ${TARGET_PIPELINE_ID}.json> /dev/null 2>&1; then
-    echo "Converting envProperties to properties (lowercase type)"
-    jq -c '.envProperties[] | .type |= ascii_downcase' ${TARGET_PIPELINE_ID}.json > properties-${TARGET_PIPELINE_ID}.json  
+    echo "Converting envProperties to properties (lowercase type except for SECURE type)"
+    jq -c '.properties[] | if (.type=="SECURE") then . else .type |= ascii_downcase end' ${TARGET_PIPELINE_ID}.json > properties-${TARGET_PIPELINE_ID}.json
     # Delete envProperties in favor to properties
     cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
     jq --slurpfile props properties-${TARGET_PIPELINE_ID}.json '. | .properties=$props | del(.envProperties)' tmp-${TARGET_PIPELINE_ID}.json > ${TARGET_PIPELINE_ID}.json
