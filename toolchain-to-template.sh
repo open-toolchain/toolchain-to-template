@@ -39,11 +39,10 @@ function download_classic_pipeline() {
   # cat "${SOURCE_PIPELINE_ID}.yaml"
 
   # convert the yaml to json 
-  # yq r -j ${SOURCE_PIPELINE_ID}.yaml | tee ${SOURCE_PIPELINE_ID}.json
   yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
 
   # Remove the hooks and (temporary workaround) the workers definition also
-  jq 'del(. | .hooks)' $SOURCE_PIPELINE_ID.json | jq 'del(.stages[] | .worker)' > "${TARGET_PIPELINE_ID}.json"
+  jq 'del(. | .hooks)' $SOURCE_PIPELINE_ID.json | jq 'del(.stages[] | .worker)' > ${TARGET_PIPELINE_ID}.json
 
   # add the input service 
   ## Add the token url
@@ -90,6 +89,20 @@ function download_classic_pipeline() {
   cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
   jq --slurpfile sourcecontent ./${SOURCE_PIPELINE_ID}.json '.stages | {"stages": ., "properties": $sourcecontent[0].properties }' ./tmp-${TARGET_PIPELINE_ID}.json > ${TARGET_PIPELINE_ID}.json
 
+  # Find the privateworker service definition corresponding to the referenced privateworker and add it to the result
+  SPECIFIED_PW_NAME=$(jq -r '.private_worker // ""' $SOURCE_PIPELINE_ID.json)
+  # echo "SPECIFIED_PW_NAME=$SPECIFIED_PW_NAME"
+  # echo "ALL_SERVICE_DETAILS=$ALL_SERVICE_DETAILS"
+  if [ "$SPECIFIED_PW_NAME" ]; then
+    # Look for the specified PW in the service details
+    FOUND_PW_SERVICEID=$(echo "${ALL_SERVICE_DETAILS}" | grep -e "${SPECIFIED_PW_NAME}" -w | awk '{print $2}' )
+    # echo "FOUND_PW_SERVICEID=$FOUND_PW_SERVICEID"
+    if [ "$FOUND_PW_SERVICEID" ]; then
+      jq --arg pw_serviceid '${'${FOUND_PW_SERVICEID}'}' '.private_worker=$pw_serviceid' ${TARGET_PIPELINE_ID}.json > tmp-${TARGET_PIPELINE_ID}.json
+      cp -f tmp-$TARGET_PIPELINE_ID.json $TARGET_PIPELINE_ID.json
+    fi
+  fi
+
   # yq r $TARGET_PIPELINE_ID.json | tee $TARGET_PIPELINE_ID.yaml
   yq r $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
 
@@ -124,13 +137,10 @@ function download_tekton_pipeline() {
   # echo "==="
 
   # convert the yaml to json 
-  # yq r -j ${SOURCE_PIPELINE_ID}.yaml | tee ${SOURCE_PIPELINE_ID}.json
   yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
 
-  # Remove (temporary workaround) the workers definition 
-  #jq 'del(.private_worker)' $SOURCE_PIPELINE_ID.json > "${TARGET_PIPELINE_ID}.json"
   # Find the privateworker service definition corresponding to the referenced privateworker
-  SPECIFIED_PW_NAME=$(jq -r '.private_worker' $SOURCE_PIPELINE_ID.json)
+  SPECIFIED_PW_NAME=$(jq -r '.private_worker // ""' $SOURCE_PIPELINE_ID.json)
   # echo "SPECIFIED_PW_NAME=$SPECIFIED_PW_NAME"
   # echo "ALL_SERVICE_DETAILS=$ALL_SERVICE_DETAILS"
   if [ -z "$SPECIFIED_PW_NAME" ]; then
@@ -138,13 +148,11 @@ function download_tekton_pipeline() {
   else
     # Look for the specified PW in the service details
     # If not found, then remove private worker definition to use a default one
-    # else keep the existing privateworker definition name that will be used at template instanciation
+    # else define the private_worker field with name provided by environment variable
     FOUND_PW_SERVICEID=$(echo "${ALL_SERVICE_DETAILS}" | grep -e "${SPECIFIED_PW_NAME}" -w | awk '{print $2}' )
     if [ -z "$FOUND_PW_SERVICEID" ]; then
       jq 'del(.private_worker)' $SOURCE_PIPELINE_ID.json > "${TARGET_PIPELINE_ID}.json"
     else
-      # still use the privatewaorker name as this is what will be defined by the template instanciation
-      # no indirection thru an environment variable
       jq --arg pw_serviceid '${'${FOUND_PW_SERVICEID}'}' '.private_worker=$pw_serviceid' $SOURCE_PIPELINE_ID.json > "${TARGET_PIPELINE_ID}.json"
     fi
   fi
@@ -347,7 +355,7 @@ do
               | awk -F{ '{print $2}' \
               | awk -F} '{print $1}' )
           fi
-          echo "PRIVATE_WORKER_SERVICE=$PRIVATE_WORKER_SERVICE"          
+          # echo "PRIVATE_WORKER_SERVICE=$PRIVATE_WORKER_SERVICE"          
           
           # Insert env entry for each of the git service
           if [ "${GIT_SERVICES_LIST}" ] ; then
@@ -397,16 +405,43 @@ do
             yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.execute"
           fi
 
-          SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
+          GIT_SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
             | grep --invert-match " null$" \
             | sed -E 's/- - /- /' \
             | sort --unique )
+
+          # Find the private worker service if needed
+          PRIVATE_WORKER_SERVICE=$(yq read "${PIPELINE_FILE_NAME}" 'private_worker')
+          if [ "$PRIVATE_WORKER_SERVICE" == "null" ]; then
+            PRIVATE_WORKER_SERVICE=""
+          else
+            # Remove the enclosing ${ } 
+            PRIVATE_WORKER_SERVICE=$(echo "$PRIVATE_WORKER_SERVICE" \
+              | awk -F{ '{print $2}' \
+              | awk -F} '{print $1}' )
+          fi
+          # echo "PRIVATE_WORKER_SERVICE=$PRIVATE_WORKER_SERVICE"          
+
+          # Insert env entry for the private worker service if needed
+          # and define the SERVICES_LIST accordingly
+          if [ "${PRIVATE_WORKER_SERVICE}" ]; then
+            ENV_ENTRY_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
+            echo "${PRIVATE_WORKER_SERVICE}: '{{services."${PRIVATE_WORKER_SERVICE}".parameters.name}}'" > "${ENV_ENTRY_LIST_FILE}"
+            yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
+            yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            rm "${ENV_ENTRY_LIST_FILE}"
+
+            SERVICES_LIST="${GIT_SERVICES_LIST}${NEWLINE}- ${PRIVATE_WORKER_SERVICE}"
+          else 
+            SERVICES_LIST="${GIT_SERVICES_LIST}"
+          fi
+
         fi
 
         # Insert the reference to pipeline content file in the pipeline service definition
         yq write --inplace "${SERVICE_FILE_NAME}" "configuration.content.\$text" "${PIPELINE_FILE_NAME}"
 
-        # Insert services list into parameters, like:
+        # Insert services list (git or private workers) into parameters, like:
         #   service_id: pipeline
         #   parameters:
         #     services:
