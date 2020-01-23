@@ -4,8 +4,8 @@
 # of you original toolchain.
 #
 # SETUP:
-# 0) These script requires that the following utilities are pre-installed on your PATH: ibmcloud, cURL, 
-#    jq (https://stedolan.github.io/jq/), and yq (https://github.com/mikefarah/yq) 
+# 0) These script requires that the following utilities are pre-installed on your PATH: ibmcloud, cURL,
+#    jq (https://stedolan.github.io/jq/), and yq (https://github.com/mikefarah/yq)
 # 1) Create a temporary work folder to use to generate your template
 # 2) Download and copy `toolchain-to-template.sh` to your work folder
 # 3) Use ibmcloud CLI to login to the account where your toolchain resides
@@ -38,16 +38,16 @@ function download_classic_pipeline() {
   # echo "YAML from source classic pipeline"
   # cat "${SOURCE_PIPELINE_ID}.yaml"
 
-  # convert the yaml to json 
+  # convert the yaml to json
   yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
 
-  # Remove the hooks and (temporary workaround) the workers definition also
-  jq 'del(. | .hooks)' $SOURCE_PIPELINE_ID.json | jq 'del(.stages[] | .worker)' > ${TARGET_PIPELINE_ID}.json
+  # Remove the hooks
+  jq 'del(. | .hooks)' $SOURCE_PIPELINE_ID.json > ${TARGET_PIPELINE_ID}.json
 
-  # add the input service 
+  # add the input service
   ## Add the token url
   jq -r '.stages[] | select( .inputs and .inputs[0].type=="git") | .inputs[0].url' $SOURCE_PIPELINE_ID.json |\
-  while IFS=$'\n\r' read -r input_gitrepo 
+  while IFS=$'\n\r' read -r input_gitrepo
   do
     # Add a token field/line for input of type git and url being $git_repo
     cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
@@ -71,7 +71,7 @@ function download_classic_pipeline() {
   # to have:
   #   - events: '{"push":true}'
   jq -r '.stages[] | select( .triggers[0].type=="git" and .triggers[0].events == null ) | .name ' $SOURCE_PIPELINE_ID.json |\
-  while IFS=$'\n\r' read -r stage_name 
+  while IFS=$'\n\r' read -r stage_name
   do
     cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
 
@@ -79,6 +79,41 @@ function download_classic_pipeline() {
       '.stages[] | if ( .name==$stage_name ) then  .triggers[0]=( .triggers[0] + { "events": "{\"push\":true}" } ) else . end' \
       tmp-$TARGET_PIPELINE_ID.json \
       | jq -s '{"stages": .}' > ${TARGET_PIPELINE_ID}.json
+  done
+
+  # convert
+  # stages:
+  # - name: BUILD
+  #   worker: a private worker name
+  # to have (if private worker defined in the toolchain)
+  #   worker: ${private_workerXXX}
+  # or delete .worker field
+  jq -r '.stages[] | .worker' $SOURCE_PIPELINE_ID.json |\
+  while IFS=$'\n\r' read -r private_worker_name
+  do
+    if [ "$private_worker_name" ]; then
+      cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+
+      # if privateworker name not == null then look for the specified PW in the service details
+      if [ "$private_worker_name" == "null" ]; then
+        FOUND_PW_SERVICEID=""
+      else
+        FOUND_PW_SERVICEID=$(echo "${ALL_SERVICE_DETAILS}" | grep -e "${private_worker_name}" -w | awk '{print $2}' )
+      fi
+      # echo "FOUND_PW_SERVICEID=$FOUND_PW_SERVICEID"
+      if [ "$FOUND_PW_SERVICEID" ]; then
+        jq -r --arg private_worker_name "$private_worker_name" --arg pw_serviceid '${'${FOUND_PW_SERVICEID}'}' \
+          '.stages[] | if ( .worker==$private_worker_name ) then .worker=$pw_serviceid else . end' \
+          tmp-$TARGET_PIPELINE_ID.json \
+          | jq -s '{"stages": .}' > ${TARGET_PIPELINE_ID}.json
+      else 
+        # Delete the worker definition as the private worker is not defined in the toolchain (Shared worker probably or no worker defined)
+        jq -r --arg private_worker_name "$private_worker_name" \
+          '.stages[] | if ( .worker==$private_worker_name ) then del(.worker) else . end' \
+          tmp-$TARGET_PIPELINE_ID.json \
+          | jq -s '{"stages": .}' > ${TARGET_PIPELINE_ID}.json
+      fi
+    fi
   done
 
   # remove the input url
@@ -89,7 +124,7 @@ function download_classic_pipeline() {
   cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
   jq --slurpfile sourcecontent ./${SOURCE_PIPELINE_ID}.json '.stages | {"stages": ., "properties": $sourcecontent[0].properties }' ./tmp-${TARGET_PIPELINE_ID}.json > ${TARGET_PIPELINE_ID}.json
 
-  # Find the privateworker service definition corresponding to the referenced privateworker and add it to the result
+  # Find the privateworker service definition at the pipeline level corresponding to the referenced privateworker and add it to the result
   SPECIFIED_PW_NAME=$(jq -r '.private_worker // ""' $SOURCE_PIPELINE_ID.json)
   # echo "SPECIFIED_PW_NAME=$SPECIFIED_PW_NAME"
   # echo "ALL_SERVICE_DETAILS=$ALL_SERVICE_DETAILS"
@@ -103,7 +138,6 @@ function download_classic_pipeline() {
     fi
   fi
 
-  # yq r $TARGET_PIPELINE_ID.json | tee $TARGET_PIPELINE_ID.yaml
   yq r $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
 
   echo "Classic pipeline content generated: $TARGET_PIPELINE_ID.yml"
@@ -136,7 +170,7 @@ function download_tekton_pipeline() {
   # cat "${SOURCE_PIPELINE_ID}.yaml"
   # echo "==="
 
-  # convert the yaml to json 
+  # convert the yaml to json
   yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
 
   # Find the privateworker service definition corresponding to the referenced privateworker
@@ -166,9 +200,9 @@ function download_tekton_pipeline() {
     jq --slurpfile props properties-${TARGET_PIPELINE_ID}.json '. | .properties=$props | del(.envProperties)' tmp-${TARGET_PIPELINE_ID}.json > ${TARGET_PIPELINE_ID}.json
   fi
 
-  # add the input service(s) 
+  # add the input service(s)
   jq -r '.inputs[] | select(.type=="git") | .url' $SOURCE_PIPELINE_ID.json |\
-  while IFS=$'\n\r' read -r input_gitrepo 
+  while IFS=$'\n\r' read -r input_gitrepo
   do
     # add service for each git input
     cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
@@ -180,7 +214,7 @@ function download_tekton_pipeline() {
     jq -r -c --arg input_gitrepo "$input_gitrepo"  --arg repo_service "\${${INPUT_REPO_SERVICE_NAME}}" \
       '.inputs[] | if ( .type=="git" and .url==$input_gitrepo) then .=( del(.url) + { "service": $repo_service }) else . end' \
       tmp-$TARGET_PIPELINE_ID.json > inputs-${TARGET_PIPELINE_ID}.json
-    
+
     jq --slurpfile inputs inputs-${TARGET_PIPELINE_ID}.json '.inputs=$inputs' tmp-$TARGET_PIPELINE_ID.json > ${TARGET_PIPELINE_ID}.json
 
   done
@@ -196,9 +230,9 @@ function download_tekton_pipeline() {
 #### MAIN ####
 
 TOOLCHAIN_URL=$1
-if [ -z "${TOOLCHAIN_URL}" ]; then 
+if [ -z "${TOOLCHAIN_URL}" ]; then
   echo "Missing Toolchain URL argument"
-  exit 1 
+  exit 1
 fi
 
 FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}&isUIRequest=true"
@@ -315,15 +349,15 @@ do
     # Start with service parameters list:
     echo "${SERVICE_PARAMETERS}" > "${SERVICE_FILE_NAME}"
 
-    # Delete initial configuration content for the service 
+    # Delete initial configuration content for the service
     yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.content"
 
-    # Delete initial configuration env for the service 
+    # Delete initial configuration env for the service
     yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.env"
 
     if [ 'pipeline' = "${SERVICE_ID}"  ] ; then
         # if pipeline, extra work
-        PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq read - type)        
+        PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq read - type)
         if [ "tekton" == "$PIPELINE_TYPE" ]; then
           # if tekton pipeline, extra work
           SERVICE_DASHBOARD_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].dashboard_url")
@@ -350,13 +384,13 @@ do
           if [ "$PRIVATE_WORKER_SERVICE" == "null" ]; then
             PRIVATE_WORKER_SERVICE=""
           else
-            # Remove the enclosing ${ } 
+            # Remove the enclosing ${ }
             PRIVATE_WORKER_SERVICE=$(echo "$PRIVATE_WORKER_SERVICE" \
               | awk -F{ '{print $2}' \
               | awk -F} '{print $1}' )
           fi
-          # echo "PRIVATE_WORKER_SERVICE=$PRIVATE_WORKER_SERVICE"          
-          
+          # echo "PRIVATE_WORKER_SERVICE=$PRIVATE_WORKER_SERVICE"
+
           # Insert env entry for each of the git service
           if [ "${GIT_SERVICES_LIST}" ] ; then
             # Recreate an env entries list for each of the git services
@@ -383,11 +417,11 @@ do
             rm "${ENV_ENTRY_LIST_FILE}"
 
             SERVICES_LIST="${GIT_SERVICES_LIST}${NEWLINE}- ${PRIVATE_WORKER_SERVICE}"
-          else 
+          else
             SERVICES_LIST="${GIT_SERVICES_LIST}"
           fi
 
-        else 
+        else
           # default to classic pipeline extra work
           PIPELINE_EXTERNAL_API_URL=$(echo "$SERVICE_PARAMETERS" | yq read - external_api_url)
           TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
@@ -410,32 +444,39 @@ do
             | sed -E 's/- - /- /' \
             | sort --unique )
 
-          # Find the private worker service if needed
-          PRIVATE_WORKER_SERVICE=$(yq read "${PIPELINE_FILE_NAME}" 'private_worker')
-          if [ "$PRIVATE_WORKER_SERVICE" == "null" ]; then
-            PRIVATE_WORKER_SERVICE=""
-          else
-            # Remove the enclosing ${ } 
-            PRIVATE_WORKER_SERVICE=$(echo "$PRIVATE_WORKER_SERVICE" \
-              | awk -F{ '{print $2}' \
-              | awk -F} '{print $1}' )
-          fi
-          # echo "PRIVATE_WORKER_SERVICE=$PRIVATE_WORKER_SERVICE"          
+          # Find the private worker services referenced in this pipeline
+          PW_LIST="- $(yq read ${PIPELINE_FILE_NAME} 'private_worker')${NEWLINE}$(yq read ${PIPELINE_FILE_NAME} 'stages[*].worker')"
+          PRIVATE_WORKER_SERVICES=$( echo "$PW_LIST" \
+            | grep --invert-match " null$" \
+            | sed -E 's/- - /- /' \
+            | awk -F{ '{print $2}' \
+            | awk -F} '{print $1}' \
+            | sort --unique )
+          # echo "PRIVATE_WORKER_SERVICES=$PRIVATE_WORKER_SERVICES"
 
           # Insert env entry for the private worker service if needed
           # and define the SERVICES_LIST accordingly
-          if [ "${PRIVATE_WORKER_SERVICE}" ]; then
+          if [ "${PRIVATE_WORKER_SERVICES}" ]; then
             ENV_ENTRY_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
-            echo "${PRIVATE_WORKER_SERVICE}: '{{services."${PRIVATE_WORKER_SERVICE}".parameters.name}}'" > "${ENV_ENTRY_LIST_FILE}"
+            touch ${ENV_ENTRY_LIST_FILE}
+            echo "$PRIVATE_WORKER_SERVICES" | while IFS=$'\n\r' read -r private_worker_service
+            do
+              echo "${private_worker_service}: '{{services."${private_worker_service}".parameters.name}}'" >> "${ENV_ENTRY_LIST_FILE}"
+            done
             yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
             yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             rm "${ENV_ENTRY_LIST_FILE}"
 
-            SERVICES_LIST="${GIT_SERVICES_LIST}${NEWLINE}- ${PRIVATE_WORKER_SERVICE}"
-          else 
+            PRIVATE_WORKER_SERVICES_LIST=$( echo "$PW_LIST" \
+              | grep --invert-match " null$" \
+              | sed -E 's/- - /- /' \
+              | awk -F{ '{print $2}' \
+              | awk -F} '{print "- "$1}' \
+              | sort --unique )
+            SERVICES_LIST="${GIT_SERVICES_LIST}${NEWLINE}${PRIVATE_WORKER_SERVICES_LIST}"
+          else
             SERVICES_LIST="${GIT_SERVICES_LIST}"
           fi
-
         fi
 
         # Insert the reference to pipeline content file in the pipeline service definition
@@ -460,7 +501,7 @@ do
     # suppress the value of any type:password parameter
     echo "${SERVICE_BROKERS}" |  jq -r  --arg service_id "${SERVICE_ID}" \
       '.service_brokers[] | select( .entity.unique_id == $service_id and .metadata.parameters.properties ) | .metadata.parameters.properties | keys[] | . ' |\
-    while IFS=$'\n\r' read -r property_name 
+    while IFS=$'\n\r' read -r property_name
     do
       PROPERTY_TYPE=$( echo "${SERVICE_BROKERS}" |  jq -r  --arg service_id "${SERVICE_ID}" --arg property_name "${property_name}" \
         '.service_brokers[] | select( .entity.unique_id == $service_id ) | .metadata.parameters.properties[$property_name] | .type' )
@@ -510,7 +551,7 @@ do
     # echo " == [${i}] has: =="
     # cat "${SERVICE_FILE_NAME}"
     # echo " == /end ${i} =SERVICE_NAME="
-    yq merge --inplace "${TOOLCHAIN_YML_FILE_NAME}" "${SERVICE_FILE_NAME}" 
+    yq merge --inplace "${TOOLCHAIN_YML_FILE_NAME}" "${SERVICE_FILE_NAME}"
     rm "${SERVICE_FILE_NAME}"
 done
 
@@ -530,7 +571,7 @@ else
   echo "WARNING, no repository tool found, so not marked required, browser will give error for template with no required service."
 fi
 
-PIPELINE_FILE_NAMES=$( echo "${PIPELINE_FILE_NAMES}" | sed -E 's/,//' ) 
+PIPELINE_FILE_NAMES=$( echo "${PIPELINE_FILE_NAMES}" | sed -E 's/,//' )
 
 echo "Output ${TOOLCHAIN_YML_FILE_NAME} file."
 # cat "${TOOLCHAIN_YML_FILE_NAME}"
@@ -539,7 +580,7 @@ cd ..
 cat >> "README.md" << EOF
 # ${TOOLCHAIN_NAME}
 
-Generated from toolchain URL: ${TOOLCHAIN_URL}  
+Generated from toolchain URL: ${TOOLCHAIN_URL}
 on ${TIMESTAMP}
 EOF
 
@@ -550,7 +591,7 @@ cd ".bluemix" || exit 1
 cp "../${WORKDIR}/${TOOLCHAIN_YML_FILE_NAME}" "./toolchain.yml"
 
 echo "${PIPELINE_FILE_NAMES}" | tr "," "\n" |\
-while IFS=$'\n\r' read -r pipeline_file_name 
+while IFS=$'\n\r' read -r pipeline_file_name
 do
   echo "Copy pipeline file: ${pipeline_file_name}"
   cp "../${WORKDIR}/${pipeline_file_name}" "."
