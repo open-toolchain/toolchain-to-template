@@ -5,7 +5,7 @@
 #
 # SETUP:
 # 0) These script requires that the following utilities are pre-installed on your PATH: ibmcloud, cURL,
-#    jq (https://stedolan.github.io/jq/), and yq (https://github.com/mikefarah/yq)
+#    jq 1.6 (https://stedolan.github.io/jq/), and yq 2.x (https://github.com/mikefarah/yq)
 # 1) Create a temporary work folder to use to generate your template
 # 2) Download and copy `toolchain-to-template.sh` to your work folder
 # 3) Use ibmcloud CLI to login to the account where your toolchain resides
