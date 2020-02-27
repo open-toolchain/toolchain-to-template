@@ -208,7 +208,7 @@ function download_tekton_pipeline() {
     cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
 
     INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}" | sed -E 's/([^ ]+) .+/\1/' )
-    echo "Service $INPUT_REPO_SERVICE_NAME (refers to)-> $input_gitrepo"
+    echo "Service $INPUT_REPO_SERVICE_NAME (input - refers to)-> $input_gitrepo"
 
     # change the input url to the corresponding service reference
     jq -r -c --arg input_gitrepo "$input_gitrepo"  --arg repo_service "\${${INPUT_REPO_SERVICE_NAME}}" \
@@ -216,6 +216,25 @@ function download_tekton_pipeline() {
       tmp-$TARGET_PIPELINE_ID.json > inputs-${TARGET_PIPELINE_ID}.json
 
     jq --slurpfile inputs inputs-${TARGET_PIPELINE_ID}.json '.inputs=$inputs' tmp-$TARGET_PIPELINE_ID.json > ${TARGET_PIPELINE_ID}.json
+
+  done
+
+  # add the git trigger related service(s)
+  jq -r '.triggers[] | select(.type=="git") | .url' $SOURCE_PIPELINE_ID.json |\
+  while IFS=$'\n\r' read -r trigger_gitrepo
+  do
+    # add service for each git trigger
+    cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+
+    TRIGGER_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${trigger_gitrepo}" | sed -E 's/([^ ]+) .+/\1/' )
+    echo "Service $TRIGGER_REPO_SERVICE_NAME (trigger - refers to)-> $trigger_gitrepo"
+
+    # change the input url to the corresponding service reference
+    jq -r -c --arg trigger_gitrepo "$trigger_gitrepo"  --arg repo_service "\${${TRIGGER_REPO_SERVICE_NAME}}" \
+      '.triggers[] | if ( .type=="git" and .url==$trigger_gitrepo) then .=( del(.url) + { "service": $repo_service }) else . end' \
+      tmp-$TARGET_PIPELINE_ID.json > triggers-${TARGET_PIPELINE_ID}.json
+
+    jq --slurpfile triggers triggers-${TARGET_PIPELINE_ID}.json '.triggers=$triggers' tmp-$TARGET_PIPELINE_ID.json > ${TARGET_PIPELINE_ID}.json
 
   done
 
@@ -372,7 +391,9 @@ do
           PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
 
           # Find the list of git services defined in the inputs section
-          GIT_SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' \
+          yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' > tmp-git-services-list.txt
+          yq read "${PIPELINE_FILE_NAME}" 'triggers[*].service' >> tmp-git-services-list.txt
+          GIT_SERVICES_LIST=$(cat tmp-git-services-list.txt \
             | grep --invert-match " null$" \
             | sed -E 's/- - /- /' \
             | awk -F{ '{print $2}' \
@@ -392,9 +413,9 @@ do
           # echo "PRIVATE_WORKER_SERVICE=$PRIVATE_WORKER_SERVICE"
 
           # Insert env entry for each of the git service
-          if [ "${GIT_SERVICES_LIST}" ] ; then
+          if [ -s tmp-git-services-list.txt ] ; then
             # Recreate an env entries list for each of the git services
-            ENV_ENTRY_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' \
+            ENV_ENTRY_LIST=$(cat tmp-git-services-list.txt \
               | grep --invert-match " null$" \
               | sed -E 's/- - /- /' \
               | awk -F{ '{print $2}' \
