@@ -96,7 +96,6 @@ function download_classic_pipeline() {
       cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
 
       # if privateworker name not == null then look for the specified PW in the service details
-      # TODO test defined private_worker - not the beta public ones
       if [ "$private_worker_name" == "null" ] ; then
         FOUND_PW_SERVICEID=""
       else
@@ -421,7 +420,6 @@ do
           # echo "${GIT_SERVICES_LIST}"
           # echo "GIT_SERVICES_LIST end"
 
-          # TODO is this private_worker stuff working? would need to have an on-prem private worker to test.
           # Find the private worker service if needed
           PRIVATE_WORKER_SERVICE=$(yq read "${PIPELINE_FILE_NAME}" 'private_worker')
           if [ -z "$PRIVATE_WORKER_SERVICE" ] || [ "$PRIVATE_WORKER_SERVICE" == "null" ] ; then
