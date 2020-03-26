@@ -485,7 +485,6 @@ do
           # echo "GIT_SERVICES_LIST end"
 
           # Find the private worker services referenced in this pipeline
-          # TODO verify pipeline classic private workers
           PW_LIST="- $(yq read ${PIPELINE_FILE_NAME} 'private_worker')${NEWLINE}$(yq read ${PIPELINE_FILE_NAME} 'stages[*].worker')"
           PRIVATE_WORKER_SERVICES=$( echo "$PW_LIST" \
             | grep --invert-match "^- null$" \
