@@ -130,33 +130,55 @@ if [ -z "${TOOLCHAIN_URL}" ]; then
   exit 1 
 fi
 
-# &isUIRequest=true
-FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}"
-echo "Toolchain url is: $FULL_TOOLCHAIN_URL"
-# old, token for public cloud:
-# BEARER_TOKEN=$(ibmcloud iam oauth-tokens --output JSON | jq -r '.iam_token')
-# TODO detect, if 401 Not Authorized returned, try using cf auth-token instead.
-# Note cf installer downloaded from: 
-# https://github.com/cloudfoundry/cli#installers-and-compressed-binaries
-# because the mac homebrew installation gave an error.
-BEARER_TOKEN=$(cf oauth-token | grep bearer)
+#  TODO document PUBLIC_CLOUD option, else dedicated
+#  detect public cloud vs dedicated
+if [ -z "${PUBLIC_CLOUD}" ] ; then
+  if [[ ("${TOOLCHAIN_URL}" = "https://cloud.ibm.com/"*) || \
+    ("${TOOLCHAIN_URL}" = "https://test.cloud.ibm.com/"*) || \
+    ("${TOOLCHAIN_URL}" = "https://dev.console.test.cloud.ibm.com/"*) ]] ; then
+    PUBLIC_CLOUD="true"
+  fi
+fi
 
+if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
+  # echo "PUBLIC_CLOUD? ${PUBLIC_CLOUD}"
+  FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}&isUIRequest=true"
+  BEARER_TOKEN=$(ibmcloud iam oauth-tokens --output JSON | jq -r '.iam_token')
+else # dedicated
+  # echo "Not PUBLIC_CLOUD, assuming dedicated."
+  FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}"
+  # TODO document need cf for dedicated
+  # Note cf installer downloaded from: 
+  # https://github.com/cloudfoundry/cli#installers-and-compressed-binaries
+  # because the mac homebrew installation gave an error.
+  BEARER_TOKEN=$(cf oauth-token | grep bearer)
+fi
+echo "Toolchain url is: $FULL_TOOLCHAIN_URL"
+
+#  --verbose
 OLD_TOOLCHAIN_JSON=$(curl \
-  --fail --show-error --verbose\
+  --fail --show-error\
   -H "Authorization: ${BEARER_TOKEN}" \
   -H "Accept: application/json" \
   -H "include: everything" \
   "${FULL_TOOLCHAIN_URL}")
 
-# SERVICE_BROKERS=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.services | { "service_brokers": . }' )
-# OLD_TOOLCHAIN_JSON=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.toolchain' )
-SERVICE_BROKERS=$( echo "[]" | jq -r '. | { "service_brokers": . }' )
-#  Note on dedicated, no region_id and domain prefix is different
-# REGION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.region_id' | sed 's/.*[:]//')
-# PIPELINE_API_URL="https://pipeline-service.${REGION}.devops.cloud.ibm.com/pipeline"
-DEDICATED_DOMAIN=$(echo "${TOOLCHAIN_URL}" | sed -E 's~https://console.([^/]*)/devops.*~\1~')
-# like https://otc-pipeline-server.dys0.bluemix.net/pipeline
-PIPELINE_API_URL="https://otc-pipeline-server.${DEDICATED_DOMAIN}/pipeline"
+if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
+  SERVICE_BROKERS=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.services | { "service_brokers": . }' )
+  OLD_TOOLCHAIN_JSON=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.toolchain' )
+else
+  SERVICE_BROKERS=$( echo "[]" | jq -r '. | { "service_brokers": . }' )
+fi
+
+if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
+  REGION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.region_id' | sed 's/.*[:]//')
+  PIPELINE_API_URL="https://pipeline-service.${REGION}.devops.cloud.ibm.com/pipeline"
+else
+  #  Note on dedicated, no region_id and domain prefix is different
+  DEDICATED_DOMAIN=$(echo "${TOOLCHAIN_URL}" | sed -E 's~https://console.([^/]*)/devops.*~\1~')
+  # like https://otc-pipeline-server.dys0.bluemix.net/pipeline
+  PIPELINE_API_URL="https://otc-pipeline-server.${DEDICATED_DOMAIN}/pipeline"
+fi
 # echo "SERVICE_BROKERS is: ${SERVICE_BROKERS}"
 # echo "OLD_TOOLCHAIN_JSON is: ${OLD_TOOLCHAIN_JSON}"
 
