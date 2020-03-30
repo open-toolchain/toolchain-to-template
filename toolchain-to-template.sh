@@ -20,107 +20,149 @@
 # (Note: if your repository is private add "&repository_token=your_git_access_token")
 # Open that URL in a browser and click "Create" and you will have a newly minted clone of your original toolchain
 
-PIPELINE_API_URL=
 BEARER_TOKEN=
 
-function download_pipeline() {
+function download_classic_pipeline() {
 
-local SOURCE_PIPELINE_ID=$1
-local TARGET_PIPELINE_ID=$2
-local INPUT_REPO_SERVICES_DETAILS=$3
+  local PIPELINE_API_URL=$1
+  local SOURCE_PIPELINE_ID=$2
+  local TARGET_PIPELINE_ID=$3
+  local INPUT_REPO_SERVICES_DETAILS=$4
 
-echo "about to do: curl -H Accept: application/x-yaml ${PIPELINE_API_URL}/pipelines/${SOURCE_PIPELINE_ID}"
-curl -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}/pipelines/${SOURCE_PIPELINE_ID}"
+  #local PIPELINE_API_URL="https://pipeline-service.${REGION}.devops.cloud.ibm.com/pipeline"
 
-# echo "YAML from source pipeline"
-# cat "${SOURCE_PIPELINE_ID}.yaml"
+  echo "Get classic pipeline content: curl -H Accept: application/x-yaml ${PIPELINE_API_URL}"
+  curl -s -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}"
 
-# Find the token url for the git tile
-# echo "about to get: ${PIPELINE_API_URL}/pipelines/${SOURCE_PIPELINE_ID}/inputsources"
-# curl -H "Authorization: $BEARER_TOKEN" -H "Content-Type: application/json" -o "${SOURCE_PIPELINE_ID}_inputsources.json" "${PIPELINE_API_URL}/pipelines/${SOURCE_PIPELINE_ID}/inputsources"
+  # echo "YAML from source classic pipeline"
+  # cat "${SOURCE_PIPELINE_ID}.yaml"
 
-# convert the yaml to json 
-# yq r -j ${SOURCE_PIPELINE_ID}.yaml | tee ${SOURCE_PIPELINE_ID}.json
-yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
+  # convert the yaml to json 
+  # yq r -j ${SOURCE_PIPELINE_ID}.yaml | tee ${SOURCE_PIPELINE_ID}.json
+  yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
 
-# Remove the hooks and (temporary workaround) the workers definition also
-jq 'del(. | .hooks)' $SOURCE_PIPELINE_ID.json | jq 'del(.stages[] | .worker)' > "${TARGET_PIPELINE_ID}.json"
+  # Remove the hooks and (temporary workaround) the workers definition also
+  jq 'del(. | .hooks)' $SOURCE_PIPELINE_ID.json | jq 'del(.stages[] | .worker)' > "${TARGET_PIPELINE_ID}.json"
 
-# add the input service 
-## Add the token url
-jq -r '.stages[] | select( .inputs and .inputs[0].type=="git") | .inputs[0].url' $SOURCE_PIPELINE_ID.json |\
-while IFS=$'\n\r' read -r input_gitrepo 
-do
-  # token_url=$(cat "${SOURCE_PIPELINE_ID}_inputsources.json" | jq -r --arg git_repo "$input_gitrepo" '.[] | select( .repo_url==$git_repo ) | .token_url')
-  # echo "token url: $input_gitrepo => $token_url"
+  # add the input service 
+  ## Add the token url
+  jq -r '.stages[] | select( .inputs and .inputs[0].type=="git") | .inputs[0].url' $SOURCE_PIPELINE_ID.json |\
+  while IFS=$'\n\r' read -r input_gitrepo 
+  do
+    # Add a token field/line for input of type git and url being $git_repo
+    cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
 
-  # Add a token field/line for input of type git and url being $git_repo
+    INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}" | sed -E 's/([^ ]+) .+/\1/' )
+    echo "Service $INPUT_REPO_SERVICE_NAME (refers to)-> $input_gitrepo"
+
+      # '.stages[] | if ( .inputs[0].type=="git" and .inputs[0].url==$input_gitrepo) then  .inputs[0]=(.inputs[0] + { "service": $repo_service }) else . end' \
+    jq -r --arg input_gitrepo "$input_gitrepo"  --arg repo_service "${INPUT_REPO_SERVICE_NAME}" \
+      '.stages[] | if ( .inputs[0].type=="git" and .inputs[0].url==$input_gitrepo) then  .inputs[0]=( .inputs[0] + { "service": $repo_service }) else . end' \
+      tmp-$TARGET_PIPELINE_ID.json \
+      | jq -s '{"stages": .}' > ${TARGET_PIPELINE_ID}.json
+  done
+
+  # convert:
+  # stages:
+  # - name: BUILD
+  #   triggers:
+  #   - events: null
+  #     type: git
+  # to have:
+  #   - events: '{"push":true}'
+  jq -r '.stages[] | select( .triggers[0].type=="git" and .triggers[0].events == null ) | .name ' $SOURCE_PIPELINE_ID.json |\
+  while IFS=$'\n\r' read -r stage_name 
+  do
+    cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+
+    jq -r --arg stage_name "$stage_name" \
+      '.stages[] | if ( .name==$stage_name ) then  .triggers[0]=( .triggers[0] + { "events": "{\"push\":true}" } ) else . end' \
+      tmp-$TARGET_PIPELINE_ID.json \
+      | jq -s '{"stages": .}' > ${TARGET_PIPELINE_ID}.json
+  done
+
+  # remove the input url
   cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+  jq -r 'del( .stages[] | select( .inputs ) | .inputs[] | select( .type == "git" ) | .url )' tmp-$TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.json
 
-  INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}" | sed -E 's/([^ ]+) .+/\1/' )
-  echo "service for repo url: $INPUT_REPO_SERVICE_NAME : $input_gitrepo"
-
-    # '.stages[] | if ( .inputs[0].type=="git" and .inputs[0].url==$input_gitrepo) then  .inputs[0]=(.inputs[0] + { "service": $repo_service }) else . end' \
-  jq -r --arg input_gitrepo "$input_gitrepo"  --arg repo_service "${INPUT_REPO_SERVICE_NAME}" \
-    '.stages[] | if ( .inputs[0].type=="git" and .inputs[0].url==$input_gitrepo) then  .inputs[0]=( .inputs[0] + { "service": $repo_service }) else . end' \
-    tmp-$TARGET_PIPELINE_ID.json \
-    | jq -s '{"stages": .}' > ${TARGET_PIPELINE_ID}.json
-done
-
-# convert:
-# stages:
-# - name: BUILD
-#   triggers:
-#   - events: null
-#     type: git
-# to have:
-#   - events: '{"push":true}'
-
-jq -r '.stages[] | select( .triggers[0].type=="git" and .triggers[0].events == null ) | .name ' $SOURCE_PIPELINE_ID.json |\
-while IFS=$'\n\r' read -r stage_name 
-do
+  # Add the pipeline properties in the target
   cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+  jq --slurpfile sourcecontent ./${SOURCE_PIPELINE_ID}.json '.stages | {"stages": ., "properties": $sourcecontent[0].properties }' ./tmp-${TARGET_PIPELINE_ID}.json > ${TARGET_PIPELINE_ID}.json
 
-  jq -r --arg stage_name "$stage_name" \
-    '.stages[] | if ( .name==$stage_name ) then  .triggers[0]=( .triggers[0] + { "events": "{\"push\":true}" } ) else . end' \
-    tmp-$TARGET_PIPELINE_ID.json \
-    | jq -s '{"stages": .}' > ${TARGET_PIPELINE_ID}.json
-done
+  # yq r $TARGET_PIPELINE_ID.json | tee $TARGET_PIPELINE_ID.yaml
+  yq r $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
 
-# remove the input url
-cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
-jq -r 'del( .stages[] | select( .inputs ) | .inputs[] | select( .type == "git" ) | .url )' tmp-$TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.json
+  echo "Classic pipeline content generated: $TARGET_PIPELINE_ID.yml"
+  # echo "==="
+  # cat "$TARGET_PIPELINE_ID.yml"
+  # echo "==="
 
-# Add the pipeline properties in the target
-cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
-jq --slurpfile sourcecontent ./${SOURCE_PIPELINE_ID}.json '.stages | {"stages": ., "properties": $sourcecontent[0].properties }' ./tmp-${TARGET_PIPELINE_ID}.json > ${TARGET_PIPELINE_ID}.json
+  # echoing the secured properties (pipeline and stage) that can not be valued there
+  echo "The following pipeline secure properties needs to be updated with appropriate values:"
+  jq -r 'select(.properties != null) | .properties[] | select(.type=="secure") | .name' ${TARGET_PIPELINE_ID}.json
 
-# yq r $TARGET_PIPELINE_ID.json | tee $TARGET_PIPELINE_ID.yaml
-yq r $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
-
-echo "$TARGET_PIPELINE_ID.yml generated"
-# echo "==="
-# cat "$TARGET_PIPELINE_ID.yml"
-# echo "==="
-
-# Include the yaml as rawcontent (ie needs to replace cr by \n and " by \" )
-# echo '{}' | jq --rawfile yaml $TARGET_PIPELINE_ID.yaml '{"config": {"format": "yaml","content": $yaml}}' > ${TARGET_PIPELINE_ID}_configuration.json
-
-# # HTTP PUT to target pipeline
-# curl -is -H "Authorization: $BEARER_TOKEN" -H "Content-Type: application/json" -X PUT -d @${TARGET_PIPELINE_ID}_configuration.json $PIPELINE_API_URL/pipelines/$TARGET_PIPELINE_ID/configuration 
-
-# Check the configuration if it has been applied correctly
-# curl -H "Authorization: $BEARER_TOKEN" -H "Accept: application/json" $PIPELINE_API_URL/pipelines/$TARGET_PIPELINE_ID/configuration
-
-# echoing the secured properties (pipeline and stage) that can not be valued there
-echo "The following pipeline secure properties needs to be updated with appropriate values:"
-jq -r 'select(.properties != null) | .properties[] | select(.type=="secure") | .name' ${TARGET_PIPELINE_ID}.json
-
-echo "The following stage secure properties needs to be updated with appropriate values:"
-jq -r '.stages[] | . as $stage | .properties // [] | .[] | select(.type=="secure") | [$stage.name] + [.name] | join(" - ")' ${TARGET_PIPELINE_ID}.json
+  echo "The following stage secure properties needs to be updated with appropriate values:"
+  jq -r '.stages[] | . as $stage | .properties // [] | .[] | select(.type=="secure") | [$stage.name] + [.name] | join(" - ")' ${TARGET_PIPELINE_ID}.json
 
 }
 
+function download_tekton_pipeline() {
+
+  local PIPELINE_API_URL=$1
+  local SOURCE_PIPELINE_ID=$2
+  local TARGET_PIPELINE_ID=$3
+  local INPUT_REPO_SERVICES_DETAILS=$4
+
+  echo "Get tekton pipeline content: curl -H Accept: application/x-yaml ${PIPELINE_API_URL}"
+  curl -s -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}"
+
+  #echo "YAML from source tekton pipeline"
+  #echo "==="
+  #cat "${SOURCE_PIPELINE_ID}.yaml"
+  #echo "==="
+
+  # convert the yaml to json 
+  # yq r -j ${SOURCE_PIPELINE_ID}.yaml | tee ${SOURCE_PIPELINE_ID}.json
+  yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
+
+  # Remove (temporary workaround) the workers definition 
+  jq 'del(.private_worker)' $SOURCE_PIPELINE_ID.json > "${TARGET_PIPELINE_ID}.json"
+
+  # For each properties, make the type lowercase
+  if jq -e -c '.envProperties' ${TARGET_PIPELINE_ID}.json> /dev/null 2>&1; then
+    echo "Converting envProperties to properties (lowercase type)"
+    jq -c '.envProperties[] | .type |= ascii_downcase' ${TARGET_PIPELINE_ID}.json > properties-${TARGET_PIPELINE_ID}.json  
+    # Delete envProperties in favor to properties
+    cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+    jq --slurpfile props properties-${TARGET_PIPELINE_ID}.json '. | .properties=$props | del(.envProperties)' tmp-${TARGET_PIPELINE_ID}.json > ${TARGET_PIPELINE_ID}.json
+  fi
+
+  # add the input service(s) 
+  jq -r '.inputs[] | select(.type=="git") | .url' $SOURCE_PIPELINE_ID.json |\
+  while IFS=$'\n\r' read -r input_gitrepo 
+  do
+    # add service for each git input
+    cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
+
+    INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}" | sed -E 's/([^ ]+) .+/\1/' )
+    echo "Service $INPUT_REPO_SERVICE_NAME (refers to)-> $input_gitrepo"
+
+    # change the input url to the corresponding service reference
+    jq -r -c --arg input_gitrepo "$input_gitrepo"  --arg repo_service "\${${INPUT_REPO_SERVICE_NAME}}" \
+      '.inputs[] | if ( .type=="git" and .url==$input_gitrepo) then .=( del(.url) + { "service": $repo_service }) else . end' \
+      tmp-$TARGET_PIPELINE_ID.json > inputs-${TARGET_PIPELINE_ID}.json
+    
+    jq --slurpfile inputs inputs-${TARGET_PIPELINE_ID}.json '.inputs=$inputs' tmp-$TARGET_PIPELINE_ID.json > ${TARGET_PIPELINE_ID}.json
+
+  done
+
+  yq r $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
+
+  echo "Tekton pipeline content generated: $TARGET_PIPELINE_ID.yml"
+  #echo "==="
+  #cat "$TARGET_PIPELINE_ID.yml"
+  #echo "==="
+}
 
 #### MAIN ####
 
@@ -155,9 +197,8 @@ else # dedicated
 fi
 echo "Toolchain url is: $FULL_TOOLCHAIN_URL"
 
-#  --verbose
-OLD_TOOLCHAIN_JSON=$(curl \
-  --fail --show-error\
+OLD_TOOLCHAIN_JSON=$(curl -s \
+  --fail --show-error \
   -H "Authorization: ${BEARER_TOKEN}" \
   -H "Accept: application/json" \
   -H "include: everything" \
@@ -168,16 +209,6 @@ if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
   OLD_TOOLCHAIN_JSON=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.toolchain' )
 else
   SERVICE_BROKERS=$( echo "[]" | jq -r '. | { "service_brokers": . }' )
-fi
-
-if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
-  REGION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.region_id' | sed 's/.*[:]//')
-  PIPELINE_API_URL="https://pipeline-service.${REGION}.devops.cloud.ibm.com/pipeline"
-else
-  #  Note on dedicated, no region_id and domain prefix is different
-  DEDICATED_DOMAIN=$(echo "${TOOLCHAIN_URL}" | sed -E 's~https://console.([^/]*)/devops.*~\1~')
-  # like https://otc-pipeline-server.dys0.bluemix.net/pipeline
-  PIPELINE_API_URL="https://otc-pipeline-server.${DEDICATED_DOMAIN}/pipeline"
 fi
 # echo "SERVICE_BROKERS is: ${SERVICE_BROKERS}"
 # echo "OLD_TOOLCHAIN_JSON is: ${OLD_TOOLCHAIN_JSON}"
@@ -197,7 +228,7 @@ TOOLCHAIN_DESCRIPTION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.description' || 
 
 TOOLCHAIN_YML_FILE_NAME="toolchain_${TIMESTAMP}.yml"
 
-echo "about to generate ${TOOLCHAIN_YML_FILE_NAME}"
+echo "Generating ${TOOLCHAIN_YML_FILE_NAME}"
 echo "version: 2" > "${TOOLCHAIN_YML_FILE_NAME}"
 yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" template.name "${TEMPLATE_NAME}"
 yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" template.description "${TOOLCHAIN_DESCRIPTION}"
@@ -225,8 +256,10 @@ do
     # webide
     SERVICE_NAME=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].toolchain_binding.name")
     if [ 'null' = "${SERVICE_NAME}"  ] ; then
+       # some service do not have toolchainbinding name such as private worker
+       # add the service id as the suffix to prevent collision/override
         PREFIX_NUM=$( echo "0${i}" | sed -E 's/0*(.*..)$/\1/' )
-        SERVICE_NAME="service${PREFIX_NUM}"
+        SERVICE_NAME="${SERVICE_ID}${PREFIX_NUM}"
     fi
 
     REPO_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].parameters.repo_url")
@@ -234,8 +267,8 @@ do
     SERVICE_DETAILS="${SERVICE_DETAILS}${NEWLINE}${SERVICE_INSTANCE_ID} ${SERVICE_NAME} ${REPO_URL}"
 done
 
-# echo "SERVICE_DETAILS is: ${NEWLINE}${SERVICE_DETAILS}"
-# echo "SERVICE_DETAILS end"
+#echo "SERVICE_DETAILS is: ${NEWLINE}${SERVICE_DETAILS}"
+#echo "SERVICE_DETAILS end"
 
 # REPO_DETAILS lines are like ${SERVICE_NAME} ${REPO_URL}
 REPO_DETAILS=$( echo "${SERVICE_DETAILS}" | grep --invert-match " null$" | sed -E 's/[^ ]+ ([^ ]+) (.+)/\1 \2/' )
@@ -251,6 +284,9 @@ if [ "${REPO_DETAILS}" ] ; then
 else
   echo "WARNING, no repository tool found, so not marked required, browser will give error for template with no required service."
 fi
+
+# DEBUG
+#yq read "${OLD_TOOLCHAIN_JSON_FILE}"
 
 PIPELINE_FILE_NAMES=""
 
@@ -282,23 +318,80 @@ do
     # Start with service parameters list:
     echo "${SERVICE_PARAMETERS}" > "${SERVICE_FILE_NAME}"
 
+    # Delete initial configuration content for the service 
+    yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.content"
+
+    # Delete initial configuration env for the service 
+    yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.env"
+
     if [ 'pipeline' = "${SERVICE_ID}"  ] ; then
         # if pipeline, extra work
-        TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
-        download_pipeline "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}"
+        PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq read - type)        
+        if [ "tekton" == "$PIPELINE_TYPE" ]; then
+          # if tekton pipeline, extra work
+          SERVICE_DASHBOARD_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].dashboard_url")
+          SERVICE_REGION_ID=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].region_id")
+          PIPELINE_EXTERNAL_API_URL="$(echo $TOOLCHAIN_URL | awk -F/ '{print $1"//"$3}')${SERVICE_DASHBOARD_URL}/yaml?env_id=${SERVICE_REGION_ID}"
 
-        PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
-        PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
+          TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
 
-        FOUND_API_KEY=$( yq read "${SERVICE_FILE_NAME}" 'configuration.env.API_KEY' )
-        if [ 'null' != "${FOUND_API_KEY}" ]; then
-          yq write --inplace "${SERVICE_FILE_NAME}" "configuration.env.API_KEY" ""
+          download_tekton_pipeline "${PIPELINE_EXTERNAL_API_URL}" "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}"
+
+          PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
+          PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
+
+          # Recreate a service list removing the ${} corresponding to an env definition
+          SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' \
+            | grep --invert-match " null$" \
+            | sed -E 's/- - /- /' \
+            | awk -F{ '{print $2}' \
+            | awk -F} '{print "- "$1}' \
+            | sort --unique )
+
+          # Insert env entry for each of the service
+          if [ "${SERVICES_LIST}" ] ; then
+            # Recreate an env entries list for each of the services
+            ENV_ENTRY_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' \
+              | grep --invert-match " null$" \
+              | sed -E 's/- - /- /' \
+              | awk -F{ '{print $2}' \
+              | awk -F} '{print $1": "$1}' \
+              | sort --unique )
+            ENV_ENTRY_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
+            echo "${ENV_ENTRY_LIST}" > "${ENV_ENTRY_LIST_FILE}"
+            yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
+            yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            rm "${ENV_ENTRY_LIST_FILE}"
+          fi
+        else 
+          # default to classic pipeline extra work
+          if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
+            PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - external_api_url)
+          else # dedicated
+            PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - api_url)
+          fi
+          TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
+          download_classic_pipeline "${PIPELINE_EXTERNAL_API_URL}" "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}"
+
+          PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
+          PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
+
+          FOUND_API_KEY=$( yq read "${SERVICE_FILE_NAME}" 'configuration.env.API_KEY' )
+          if [ 'null' != "${FOUND_API_KEY}" ]; then
+            yq write --inplace "${SERVICE_FILE_NAME}" "configuration.env.API_KEY" ""
+          fi
+          FOUND_EXECUTE=$( yq read "${SERVICE_FILE_NAME}" 'configuration.execute' )
+          if [ 'null' != "${FOUND_EXECUTE}" ]; then
+            yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.execute"
+          fi
+
+          SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
+            | grep --invert-match " null$" \
+            | sed -E 's/- - /- /' \
+            | sort --unique )
         fi
-        FOUND_EXECUTE=$( yq read "${SERVICE_FILE_NAME}" 'configuration.execute' )
-        if [ 'null' != "${FOUND_EXECUTE}" ]; then
-          yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.execute"
-        fi
-        yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.content"
+
+        # Insert the reference to pipeline content file in the pipeline service definition
         yq write --inplace "${SERVICE_FILE_NAME}" "configuration.content.\$text" "${PIPELINE_FILE_NAME}"
 
         # Insert services list into parameters, like:
@@ -307,10 +400,6 @@ do
         #     services:
         #     - sample-repo
         #     name: simple-toolchain-20191016105909826
-        SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
-          | grep --invert-match " null$" \
-          | sed -E 's/- - /- /' \
-          | sort --unique )
         if [ "${SERVICES_LIST}" ] ; then
           SERVICES_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_services.yml"
           echo "${SERVICES_LIST}" > "${SERVICES_LIST_FILE}"
@@ -318,6 +407,7 @@ do
           yq merge --inplace "${SERVICE_FILE_NAME}" "${SERVICES_LIST_FILE}"
           rm "${SERVICES_LIST_FILE}"
         fi
+
     fi
 
     # suppress the value of any type:password parameter
@@ -390,7 +480,7 @@ Generated from toolchain URL: ${TOOLCHAIN_URL}
 on ${TIMESTAMP}
 EOF
 
-mkdir ".bluemix"
+mkdir -p ".bluemix"
 
 cd ".bluemix" || exit 1
 
@@ -399,11 +489,11 @@ cp "../${WORKDIR}/${TOOLCHAIN_YML_FILE_NAME}" "./toolchain.yml"
 echo "${PIPELINE_FILE_NAMES}" | tr "," "\n" |\
 while IFS=$'\n\r' read -r pipeline_file_name 
 do
-  echo "copy pipeline file: ${pipeline_file_name}"
+  echo "Copy pipeline file: ${pipeline_file_name}"
   cp "../${WORKDIR}/${pipeline_file_name}" "."
 done
 
 cd ..
 set +x
 if [ -z "${DEBUG_TTT}" ]; then rm -rf ${WORKDIR} ; fi
-echo "done"
+echo "Template extraction from toolchain '${TOOLCHAIN_NAME}' done"
