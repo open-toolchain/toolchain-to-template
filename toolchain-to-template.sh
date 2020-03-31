@@ -4,12 +4,20 @@
 # of you original toolchain.
 #
 # SETUP:
-# 0) These script requires that the following utilities are pre-installed on your PATH: ibmcloud, cURL,
+# 1) These script requires that the following utilities are pre-installed on your PATH: ibmcloud, cURL,
 #    jq 1.6 (https://stedolan.github.io/jq/), and yq 3.x or 2.x (https://github.com/mikefarah/yq)
-# 1) Create a temporary work folder to use to generate your template
-# 2) Download and copy `toolchain-to-template.sh` to your work folder
-# 3) Use ibmcloud CLI to login to the account where your toolchain resides
-# 4) Visit your Toolchain in the browser and copy the URL
+# 2) Create a temporary work folder to use to generate your template
+# 3) Download and copy `toolchain-to-template.sh` to your work folder
+# 4) Determine whether your toolchain is in the public cloud or in a dedicated environment.  
+#    The following environments will be detected and will set PUBLIC_CLOUD=true, with other environments considered as dedicated;  
+#    - https://cloud.ibm.com/
+#    - https://test.cloud.ibm.com/
+#    - https://dev.console.test.cloud.ibm.com/
+# 5) Log in to respective CLI tool:
+#    - For public cloud, use `ibmcloud` CLI to login to the account where your toolchain resides
+#    - For a dedicated environment, use `cf` CLI to log in to the account.  
+#      The `cf` CLI installers are at: https://github.com/cloudfoundry/cli#installers-and-compressed-binaries
+# 6) Visit your Toolchain in the browser and copy the URL
 #
 # RUN THE SCRIPT
 # In a shell run the following: `./toolchain-to-template.sh https://your-toolchain-url`
@@ -17,8 +25,10 @@
 # The script generates a .bluemix folder that contains your template. To use the template create a git repo and
 # copy the .bluemix folder into it. Commit, push and then visit your repository on an OTC Setup/Deploy page.
 # e.g https://cloud.ibm.com/devops/setup/deploy?env_id=ibm:yp:us-south&repository=https://your_repository_url
-# (Note: if your repository is private add "&repository_token=your_git_access_token")
-# Open that URL in a browser and click "Create" and you will have a newly minted clone of your original toolchain
+# (Note: if your repository is private, on public cloud add "&repository_token=your_git_access_token",
+#  or on dedicated, insert your personal access token into the repository url,
+#  like: https://some-auth-token@example.com/username/repo )
+# Open that Setup/Deploy URL in a browser and click "Create" and you will have a newly minted clone of your original toolchain
 
 BEARER_TOKEN=
 YQ_PRETTY_PRINT=
@@ -148,7 +158,7 @@ function download_classic_pipeline() {
 
   # echoing the secured properties (pipeline and stage) that can not be valued there
   echo "The following pipeline secure properties needs to be updated with appropriate values:"
-  jq -r '.properties[] | select(.type=="secure") | .name' ${TARGET_PIPELINE_ID}.json
+  jq -r 'select(.properties != null) | .properties[] | select(.type=="secure") | .name' ${TARGET_PIPELINE_ID}.json
 
   echo "The following stage secure properties needs to be updated with appropriate values:"
   jq -r '.stages[] | . as $stage | .properties // [] | .[] | select(.type=="secure") | [$stage.name] + [.name] | join(" - ")' ${TARGET_PIPELINE_ID}.json
@@ -267,26 +277,89 @@ else
 fi
 # echo "YQ_PRETTY_PRINT is: ${YQ_PRETTY_PRINT}"
 
-FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}&isUIRequest=true"
+if [ -z "${PUBLIC_CLOUD}" ] ; then
+  if [[ ("${TOOLCHAIN_URL}" = "https://cloud.ibm.com/"*) || \
+    ("${TOOLCHAIN_URL}" = "https://test.cloud.ibm.com/"*) || \
+    ("${TOOLCHAIN_URL}" = "https://dev.console.test.cloud.ibm.com/"*) ]] ; then
+    PUBLIC_CLOUD="true"
+  fi
+fi
+
+if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
+  # echo "PUBLIC_CLOUD? ${PUBLIC_CLOUD}"
+  FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}&isUIRequest=true"
+  BEARER_TOKEN=$(ibmcloud iam oauth-tokens --output JSON | jq -r '.iam_token')
+else # dedicated
+  # echo "Not PUBLIC_CLOUD, assuming dedicated."
+  FULL_TOOLCHAIN_URL="${TOOLCHAIN_URL}"
+  BEARER_TOKEN=$(cf oauth-token | grep bearer)
+fi
 echo "Toolchain url is: $FULL_TOOLCHAIN_URL"
-BEARER_TOKEN=$(ibmcloud iam oauth-tokens --output JSON | jq -r '.iam_token')
 
 OLD_TOOLCHAIN_JSON=$(curl -s \
+  --fail --show-error \
   -H "Authorization: ${BEARER_TOKEN}" \
   -H "Accept: application/json" \
   -H "include: everything" \
   "${FULL_TOOLCHAIN_URL}")
 
-SERVICE_BROKERS=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.services | { "service_brokers": . }' )
-OLD_TOOLCHAIN_JSON=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.toolchain' )
-REGION=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.region_id' | sed 's/.*[:]//')
-# echo "SERVICE_BROKERS is: ${SERVICE_BROKERS}"
-# echo "OLD_TOOLCHAIN_JSON is: ${OLD_TOOLCHAIN_JSON}"
-
 TIMESTAMP=$(date +'%Y-%m-%dT%H-%M-%S')
 WORKDIR=work-${TIMESTAMP}
 mkdir $WORKDIR
 cd $WORKDIR
+
+if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
+  SERVICE_BROKERS=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.services | { "service_brokers": . }' )
+  OLD_TOOLCHAIN_JSON=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.toolchain' )
+else
+  # Note in dedicated, attempting to load the service brokers gives Error 500,
+  # so hard-coding the dedicated service broker properties of type password
+  cat > "service-brokers.json" << EOF
+{ "services": [ {
+    "entity": { "unique_id": "artifactory" },
+    "metadata": { "parameters": { "properties": {
+      "token": { "type": "password" }
+  } } } }, {
+    "entity": { "unique_id": "github_333900" },
+    "tags": [ "hidden" ],
+    "metadata": { "parameters": { "properties": {
+      "access_token": { "type": "password" }
+  } } } }, {
+    "entity": { "unique_id": "githubconsolidated" },
+    "metadata": { "parameters": { "properties": {
+      "access_token": { "type": "password" }
+  } } } }, {
+    "entity": { "unique_id": "githubpublic" },
+    "tags": [ "hidden" ],
+    "metadata": { "parameters": { "properties": {
+      "access_token": { "type": "password" }
+  } } } }, {
+    "entity": { "unique_id": "jira" },
+    "metadata": { "parameters": { "properties": {
+      "password": { "type": "password" }
+  } } } }, {
+    "entity": { "unique_id": "nexus" },
+    "metadata": { "parameters": { "properties": {
+      "token": { "type": "password" }
+  } } } }, {
+    "entity": { "unique_id": "pagerduty" },
+    "metadata": { "parameters": { "properties": {
+      "api_key": { "type": "password" },
+      "service_key": { "type": "password" }
+  } } } }, {
+    "entity": { "unique_id": "rationalteamconcert" },
+    "metadata": { "parameters": { "properties": {
+      "password": { "type": "password" }
+  } } } }, {
+    "entity": { "unique_id": "sonarqube" },
+    "metadata": { "parameters": { "properties": {
+      "user_password": { "type": "password" }
+} } } } ] }
+EOF
+  SERVICE_BROKERS=$( cat "service-brokers.json" | jq -r '.services | { "service_brokers": . }' )
+fi
+# echo "SERVICE_BROKERS is: ${SERVICE_BROKERS}"
+# echo "OLD_TOOLCHAIN_JSON is: ${OLD_TOOLCHAIN_JSON}"
 
 OLD_TOOLCHAIN_JSON_FILE="tmp.old_toolchain.json"
 echo "${OLD_TOOLCHAIN_JSON}" > "${OLD_TOOLCHAIN_JSON_FILE}"
@@ -463,7 +536,11 @@ do
 
         else
           # default to classic pipeline extra work
-          PIPELINE_EXTERNAL_API_URL=$(echo "$SERVICE_PARAMETERS" | yq read - external_api_url)
+          if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
+            PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - external_api_url)
+          else # dedicated
+            PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - api_url)
+          fi
           TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
           download_classic_pipeline "${PIPELINE_EXTERNAL_API_URL}" "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}" "${SERVICE_DETAILS}"
 
