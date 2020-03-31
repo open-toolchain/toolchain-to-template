@@ -9,7 +9,7 @@
 # 2) Create a temporary work folder to use to generate your template
 # 3) Download and copy `toolchain-to-template.sh` to your work folder
 # 4) Determine whether your toolchain is in the public cloud or in a dedicated environment.  
-#    The following environments be detected and set PUBLIC_CLOUD=true, with other environments considered as dedicated;  
+#    The following environments will be detected and will set PUBLIC_CLOUD=true, with other environments considered as dedicated;  
 #    - https://cloud.ibm.com/
 #    - https://test.cloud.ibm.com/
 #    - https://dev.console.test.cloud.ibm.com/
