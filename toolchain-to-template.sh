@@ -487,6 +487,7 @@ do
           GIT_SERVICES_LIST=$(cat tmp-git-services-list.txt \
             | grep --invert-match "^- null$" \
             | grep --invert-match "^null$" \
+            | grep --invert-match "^$" \
             | awk '-F{' '{print $2}' \
             | awk '-F}' '{print "- "$1}' \
             | sort --unique )
@@ -512,6 +513,7 @@ do
             ENV_ENTRY_LIST=$(cat tmp-git-services-list.txt \
               | grep --invert-match "^- null$" \
               | grep --invert-match "^null$" \
+              | grep --invert-match "^$" \
               | awk '-F{' '{print $2}' \
               | awk '-F}' '{print $1": "$1}' \
               | sort --unique )
@@ -555,8 +557,11 @@ do
 
           GIT_SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
             | grep --invert-match "^- - null$" \
+            | grep --invert-match "^- null$" \
             | grep --invert-match "^null$" \
+            | grep --invert-match "^$" \
             | sed -E 's/- - //' \
+            | sed -E 's/- //' \
             | sed -E 's/^/- /' \
             | sort --unique )
           # echo "GIT_SERVICES_LIST is:"
