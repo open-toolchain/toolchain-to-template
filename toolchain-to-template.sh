@@ -486,6 +486,7 @@ do
           yq read "${PIPELINE_FILE_NAME}" 'triggers[*].service' >> tmp-git-services-list.txt
           GIT_SERVICES_LIST=$(cat tmp-git-services-list.txt \
             | grep --invert-match "^- null$" \
+            | grep --invert-match "^null$" \
             | awk '-F{' '{print $2}' \
             | awk '-F}' '{print "- "$1}' \
             | sort --unique )
@@ -510,6 +511,7 @@ do
             # Recreate an env entries list for each of the git services
             ENV_ENTRY_LIST=$(cat tmp-git-services-list.txt \
               | grep --invert-match "^- null$" \
+              | grep --invert-match "^null$" \
               | awk '-F{' '{print $2}' \
               | awk '-F}' '{print $1": "$1}' \
               | sort --unique )
@@ -554,6 +556,7 @@ do
 
           GIT_SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
             | grep --invert-match "^- - null$" \
+            | grep --invert-match "^null$" \
             | sed -E 's/- - //' \
             | sed -E 's/^/- /' \
             | sort --unique )
@@ -566,6 +569,7 @@ do
           PRIVATE_WORKER_SERVICES=$( echo "$PW_LIST" \
             | grep --invert-match "^- null$" \
             | grep --invert-match "^- $" \
+            | grep --invert-match "^null$" \
             | grep --invert-match "^$" \
             | awk '-F{' '{print $2}' \
             | awk '-F}' '{print $1}' \
