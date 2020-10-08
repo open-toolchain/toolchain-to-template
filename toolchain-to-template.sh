@@ -63,7 +63,7 @@ function download_classic_pipeline() {
     # Add a token field/line for input of type git and url being $git_repo
     cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
 
-    INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}" | awk '{print $1}' )
+    INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}$" | head -n 1 | awk '{print $1}' )
     echo "Service $INPUT_REPO_SERVICE_NAME (refers to)-> $input_gitrepo"
 
       # '.stages[] | if ( .inputs[0].type=="git" and .inputs[0].url==$input_gitrepo) then  .inputs[0]=(.inputs[0] + { "service": $repo_service }) else . end' \
@@ -218,7 +218,7 @@ function download_tekton_pipeline() {
     # add service for each git input
     cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
 
-    INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}" | awk '{print $1}' )
+    INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}$" | head -n 1 | awk '{print $1}' )
     echo "Service $INPUT_REPO_SERVICE_NAME (input - refers to)-> $input_gitrepo"
 
     # change the input url to the corresponding service reference
@@ -237,7 +237,7 @@ function download_tekton_pipeline() {
     # add service for each git trigger
     cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
 
-    TRIGGER_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${trigger_gitrepo}" | awk '{print $1}' )
+    TRIGGER_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${trigger_gitrepo}$" | head -n 1 | awk '{print $1}' )
     echo "Service $TRIGGER_REPO_SERVICE_NAME (trigger - refers to)-> $trigger_gitrepo"
 
     # change the input url to the corresponding service reference
@@ -530,7 +530,6 @@ do
             yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
             yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             # rm "${ENV_ENTRY_LIST_FILE}"
-
             SERVICES_LIST="${GIT_SERVICES_LIST}${NEWLINE}- ${PRIVATE_WORKER_SERVICE}"
           else
             SERVICES_LIST="${GIT_SERVICES_LIST}"
@@ -588,7 +587,6 @@ do
             yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
             yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             # rm "${ENV_ENTRY_LIST_FILE}"
-
             PRIVATE_WORKER_SERVICES_LIST=$( echo "$PRIVATE_WORKER_SERVICES" \
               | sed -E 's/^/- /' )
             SERVICES_LIST="${GIT_SERVICES_LIST}${NEWLINE}${PRIVATE_WORKER_SERVICES_LIST}"
