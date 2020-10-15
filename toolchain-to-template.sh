@@ -541,6 +541,9 @@ do
           # default to classic pipeline extra work
           if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
             PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - external_api_url)
+            if [ -z "${PIPELINE_EXTERNAL_API_URL}" ] || [ 'null' = "${PIPELINE_EXTERNAL_API_URL}" ] ; then
+              PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - api_url)
+            fi
           else # dedicated
             PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - api_url)
           fi
