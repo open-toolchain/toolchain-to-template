@@ -57,7 +57,7 @@ function download_classic_pipeline() {
 
   # add the input service
   ## Add the token url
-  jq -r '.stages[] | select( .inputs and .inputs[0].type=="git") | .inputs[0].url' $SOURCE_PIPELINE_ID.json |\
+  jq -r '.stages[]? | select( .inputs and .inputs[0].type=="git") | .inputs[0].url' $SOURCE_PIPELINE_ID.json |\
   while IFS=$'\n\r' read -r input_gitrepo
   do
     # Add a token field/line for input of type git and url being $git_repo
@@ -66,7 +66,6 @@ function download_classic_pipeline() {
     INPUT_REPO_SERVICE_NAME=$( echo "${INPUT_REPO_SERVICES_DETAILS}" | grep " ${input_gitrepo}$" | head -n 1 | awk '{print $1}' )
     echo "Service $INPUT_REPO_SERVICE_NAME (refers to)-> $input_gitrepo"
 
-      # '.stages[] | if ( .inputs[0].type=="git" and .inputs[0].url==$input_gitrepo) then  .inputs[0]=(.inputs[0] + { "service": $repo_service }) else . end' \
     jq -r --arg input_gitrepo "$input_gitrepo"  --arg repo_service "${INPUT_REPO_SERVICE_NAME}" \
       '.stages[] | if ( .inputs[0].type=="git" and .inputs[0].url==$input_gitrepo) then  .inputs[0]=( .inputs[0] + { "service": $repo_service }) else . end' \
       tmp-$TARGET_PIPELINE_ID.json \
@@ -81,7 +80,7 @@ function download_classic_pipeline() {
   #     type: git
   # to have:
   #   - events: '{"push":true}'
-  jq -r '.stages[] | select( .triggers[0].type=="git" and .triggers[0].events == null ) | .name ' $SOURCE_PIPELINE_ID.json |\
+  jq -r '.stages[]? | select( .triggers[0].type=="git" and .triggers[0].events == null ) | .name ' $SOURCE_PIPELINE_ID.json |\
   while IFS=$'\n\r' read -r stage_name
   do
     cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
@@ -99,7 +98,7 @@ function download_classic_pipeline() {
   # to have (if private worker defined in the toolchain)
   #   worker: ${private_workerXXX}
   # or delete .worker field
-  jq -r '.stages[] | .worker' $SOURCE_PIPELINE_ID.json |\
+  jq -r '.stages[]? | .worker' $SOURCE_PIPELINE_ID.json |\
   while IFS=$'\n\r' read -r private_worker_name
   do
     if [ "$private_worker_name" ]; then
@@ -129,7 +128,7 @@ function download_classic_pipeline() {
 
   # remove the input url
   cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
-  jq -r 'del( .stages[] | select( .inputs ) | .inputs[] | select( .type == "git" ) | .url )' tmp-$TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.json
+  jq -r 'del( .stages[]? | select( .inputs ) | .inputs[] | select( .type == "git" ) | .url )' tmp-$TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.json
 
   # Add the pipeline properties in the target
   cp -f $TARGET_PIPELINE_ID.json tmp-$TARGET_PIPELINE_ID.json
@@ -158,10 +157,10 @@ function download_classic_pipeline() {
 
   # echoing the secured properties (pipeline and stage) that can not be valued there
   echo "The following pipeline secure properties needs to be updated with appropriate values:"
-  jq -r 'select(.properties != null) | .properties[] | select(.type=="secure") | .name' ${TARGET_PIPELINE_ID}.json
+  jq -r '.properties[]? | select(.type=="secure") | .name' ${TARGET_PIPELINE_ID}.json
 
   echo "The following stage secure properties needs to be updated with appropriate values:"
-  jq -r '.stages[] | . as $stage | .properties // [] | .[] | select(.type=="secure") | [$stage.name] + [.name] | join(" - ")' ${TARGET_PIPELINE_ID}.json
+  jq -r '.stages[]? | . as $stage | .properties[]? | select(.type=="secure") | [$stage.name] + [.name] | join(" - ")' ${TARGET_PIPELINE_ID}.json
 
 }
 
@@ -212,7 +211,7 @@ function download_tekton_pipeline() {
   fi
 
   # add the input service(s)
-  jq -r '.inputs[] | select(.type=="git") | .url' $SOURCE_PIPELINE_ID.json |\
+  jq -r '.inputs[]? | select(.type=="git") | .url' $SOURCE_PIPELINE_ID.json |\
   while IFS=$'\n\r' read -r input_gitrepo
   do
     # add service for each git input
@@ -231,7 +230,7 @@ function download_tekton_pipeline() {
   done
 
   # add the git trigger related service(s)
-  jq -r '.triggers[] | select(.type=="git") | .url' $SOURCE_PIPELINE_ID.json |\
+  jq -r '.triggers[]? | select(.type=="git") | .url' $SOURCE_PIPELINE_ID.json |\
   while IFS=$'\n\r' read -r trigger_gitrepo
   do
     # add service for each git trigger
@@ -624,7 +623,7 @@ do
 
     # suppress the value of any type:password parameter
     echo "${SERVICE_BROKERS}" |  jq -r  --arg service_id "${SERVICE_ID}" \
-      '.service_brokers[] | select( .entity.unique_id == $service_id and .metadata.parameters.properties ) | .metadata.parameters.properties | keys[] | . ' |\
+      '.service_brokers[]? | select( .entity.unique_id == $service_id and .metadata.parameters.properties ) | .metadata.parameters.properties | keys[] | . ' |\
     while IFS=$'\n\r' read -r property_name
     do
       PROPERTY_TYPE=$( echo "${SERVICE_BROKERS}" |  jq -r  --arg service_id "${SERVICE_ID}" --arg property_name "${property_name}" \
@@ -685,7 +684,7 @@ done
 #   required:
 #   - sample-repo
 #   - private-worker
-REQUIRED_SERVICES=$( yq read -j "${TOOLCHAIN_YML_FILE_NAME}" | jq -r '.services[] | .parameters | .services // [] | .[] | .' | sort -u )
+REQUIRED_SERVICES=$( yq read -j "${TOOLCHAIN_YML_FILE_NAME}" | jq -r '.services[]? | .parameters | .services[]? | .' | sort -u )
 #echo "REQUIRED_SERVICES=$REQUIRED_SERVICES"
 if [ "${REQUIRED_SERVICES}" ] ; then
   echo "${REQUIRED_SERVICES}" | awk '{print "- "$1}' \
