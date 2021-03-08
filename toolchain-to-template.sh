@@ -539,10 +539,9 @@ do
         else
           # default to classic pipeline extra work
           if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
-            PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - external_api_url)
-            if [ -z "${PIPELINE_EXTERNAL_API_URL}" ] || [ 'null' = "${PIPELINE_EXTERNAL_API_URL}" ] ; then
-              PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - api_url)
-            fi
+            SERVICE_DASHBOARD_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].dashboard_url")
+            SERVICE_REGION_ID=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].region_id")
+            PIPELINE_EXTERNAL_API_URL=$(echo "${TOOLCHAIN_URL}" | awk -F/ '{print $1"//"$3}' )"${SERVICE_DASHBOARD_URL}/yaml?env_id=${SERVICE_REGION_ID}"
           else # dedicated
             PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - api_url)
           fi
