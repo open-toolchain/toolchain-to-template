@@ -264,6 +264,18 @@ if [ -z "${TOOLCHAIN_URL}" ]; then
   exit 1
 fi
 
+WRONG_JQ=$( jq --version | grep "jq-1.6" )
+if [ -z "${WRONG_JQ}" ]; then
+  echo "Unexpected prereq 'jq --version' is not 'jq-1.6'"
+  exit 1
+fi
+
+WRONG_YQ=$( yq --version |  grep "yq version [23]\." )
+if [ -z "${WRONG_YQ}" ]; then
+  echo "Unexpected prereq 'yq --version' is not 2.x or 3.x"
+  exit 1
+fi
+
 OLD_YQ=$( yq --version | grep "yq version 2." )
 if [ -z "${OLD_YQ}" ]; then
   # yq 3 and later needs option to reformat json as yml
