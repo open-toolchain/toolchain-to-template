@@ -638,7 +638,7 @@ do
     while IFS=$'\n\r' read -r property_name
     do
       PROPERTY_TYPE=$( echo "${SERVICE_BROKERS}" |  jq -r  --arg service_id "${SERVICE_ID}" --arg property_name "${property_name}" \
-        '.service_brokers[] | select( .entity.unique_id == $service_id ) | .metadata.parameters.properties[$property_name] | .type' )
+        '.service_brokers[] | select( .entity.unique_id == $service_id ) | .metadata.parameters.properties[$property_name] | select(type == "object") | .type' )
       if [ "${PROPERTY_TYPE}" = "password"  ] ; then
         FOUND=$( yq read "${SERVICE_FILE_NAME}" "${property_name}" )
         if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
