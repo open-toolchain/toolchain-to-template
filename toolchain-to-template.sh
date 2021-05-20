@@ -270,7 +270,7 @@ if [ -z "${WRONG_JQ}" ]; then
   exit 1
 fi
 
-WRONG_YQ=$( yq --version |  grep "yq version [23]\." )
+WRONG_YQ=$( yq --version 2>&1 | grep "yq version [23]\." )
 if [ -z "${WRONG_YQ}" ]; then
   echo "Unexpected prereq 'yq --version' is not 2.x or 3.x"
   exit 1
