@@ -5,7 +5,7 @@
 #
 # SETUP:
 # 1) These script requires that the following utilities are pre-installed on your PATH: ibmcloud, cURL,
-#    jq 1.6 (https://stedolan.github.io/jq/), and yq 3.x or 2.x (https://github.com/mikefarah/yq)
+#    jq 1.6 (https://stedolan.github.io/jq/), and 4.x or yq 3.x or 2.x (https://github.com/mikefarah/yq)
 # 2) Create a temporary work folder to use to generate your template
 # 3) Download and copy `toolchain-to-template.sh` to your work folder
 # 4) Determine whether your toolchain is in the public cloud or in a dedicated environment.  
@@ -29,6 +29,7 @@
 #  or on dedicated, insert your personal access token into the repository url,
 #  like: https://some-auth-token@example.com/username/repo )
 # Open that Setup/Deploy URL in a browser and click "Create" and you will have a newly minted clone of your original toolchain
+  # shellcheck disable=SC2086
 
 BEARER_TOKEN=
 YQ_PRETTY_PRINT=
@@ -50,8 +51,11 @@ function download_classic_pipeline() {
   # cat "${SOURCE_PIPELINE_ID}.yaml"
 
   # convert the yaml to json
-  yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
-
+  if [ "$OLD_YQ_VERSION" = true ] ; then
+    yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
+  else
+    yq -o=json ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
+  fi
   # Remove the hooks
   jq 'del(. | .hooks)' $SOURCE_PIPELINE_ID.json > ${TARGET_PIPELINE_ID}.json
 
@@ -148,7 +152,11 @@ function download_classic_pipeline() {
     fi
   fi
 
-  yq read "${YQ_PRETTY_PRINT}" $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
+  if [ "$OLD_YQ_VERSION" = true ] ; then
+    yq read "${YQ_PRETTY_PRINT}" $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
+  else
+    yq -o yaml "${YQ_PRETTY_PRINT}" $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
+  fi
 
   echo "Classic pipeline content generated: $TARGET_PIPELINE_ID.yml"
   # echo "==="
@@ -181,7 +189,11 @@ function download_tekton_pipeline() {
   # echo "==="
 
   # convert the yaml to json
-  yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
+  if [ "$OLD_YQ_VERSION" = true ] ; then
+    yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
+  else
+    yq -o=json ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
+  fi
 
   # Find the privateworker service definition corresponding to the referenced privateworker
   SPECIFIED_PW_NAME=$(jq -r '.private_worker // ""' $SOURCE_PIPELINE_ID.json)
@@ -248,7 +260,11 @@ function download_tekton_pipeline() {
 
   done
 
-  yq read "${YQ_PRETTY_PRINT}" $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
+  if [ "$OLD_YQ_VERSION" = true ] ; then
+    yq read "${YQ_PRETTY_PRINT}" $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
+  else
+    yq -P $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
+  fi
 
   echo "Tekton pipeline content generated: $TARGET_PIPELINE_ID.yml"
   #echo "==="
@@ -270,10 +286,15 @@ if [ -z "${WRONG_JQ}" ]; then
   exit 1
 fi
 
-WRONG_YQ=$( yq --version 2>&1 | grep "yq version [23]\." )
+WRONG_YQ=$( yq --version 2>&1 | grep "version [234]\." )
+export OLD_YQ_VERSION=false
 if [ -z "${WRONG_YQ}" ]; then
-  echo "Unexpected prereq 'yq --version' is not 2.x or 3.x"
+  echo "Unexpected prereq 'yq --version' is not 2.x or 3.x or 4.x"
   exit 1
+else
+  if yq --version 2>&1 | grep "version [23]\." > /dev/null 2>&1; then
+    OLD_YQ_VERSION=true
+  fi 
 fi
 
 OLD_YQ=$( yq --version | grep "yq version 2." )
@@ -317,7 +338,7 @@ OLD_TOOLCHAIN_JSON=$(curl -s \
 TIMESTAMP=$(date +'%Y-%m-%dT%H-%M-%S')
 WORKDIR=work-${TIMESTAMP}
 mkdir $WORKDIR
-cd $WORKDIR
+cd "$WORKDIR" || exit
 
 if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
   SERVICE_BROKERS=$( echo "${OLD_TOOLCHAIN_JSON}" | jq -r '.services | { "service_brokers": . }' )
@@ -384,9 +405,15 @@ TOOLCHAIN_YML_FILE_NAME="toolchain_${TIMESTAMP}.yml"
 
 echo "Generating ${TOOLCHAIN_YML_FILE_NAME}"
 echo "version: 2" > "${TOOLCHAIN_YML_FILE_NAME}"
-yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" template.name "${TEMPLATE_NAME}"
-yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" template.description "${TOOLCHAIN_DESCRIPTION}"
-yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" toolchain.name "${TOOLCHAIN_NAME}"
+if [ "$OLD_YQ_VERSION" = true ] ; then
+  yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" template.name "${TEMPLATE_NAME}"
+  yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" template.description "${TOOLCHAIN_DESCRIPTION}"
+  yq write --inplace "${TOOLCHAIN_YML_FILE_NAME}" toolchain.name "${TOOLCHAIN_NAME}"
+else
+  yq -i ".template.name = \"${TEMPLATE_NAME}\"" "${TOOLCHAIN_YML_FILE_NAME}"
+  yq -i ".template.description = \"${TOOLCHAIN_DESCRIPTION}\"" "${TOOLCHAIN_YML_FILE_NAME}"
+  yq -i ".toolchain.name = \"${TOOLCHAIN_NAME}\"" "${TOOLCHAIN_YML_FILE_NAME}"
+fi
 
 SERVICE_DETAILS=""
 NEWLINE=$'\n'
@@ -396,7 +423,7 @@ for((i=0; 1 ;i++))
 do
     # 'services[0].service_id' is like:
     # orion
-    SERVICE_ID=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].service_id")
+    SERVICE_ID=$(jq -r ".services[${i}].service_id" "${OLD_TOOLCHAIN_JSON_FILE}")
     if [ -z "${SERVICE_ID}" ] || [ 'null' = "${SERVICE_ID}" ] ; then
         break;
     fi
@@ -404,24 +431,22 @@ do
 
     # 'services[0].instance_id' is like:
     # 44850da0-b5aa-4332-890c-1f8e6a48691c
-    SERVICE_INSTANCE_ID=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].instance_id")
+    SERVICE_INSTANCE_ID=$(jq -r ".services[${i}].instance_id" "${OLD_TOOLCHAIN_JSON_FILE}")
 
     # 'services[0].toolchain_binding.name' is like:
     # webide
-    BINDING_NAME=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].toolchain_binding.name")
+    BINDING_NAME=$(jq -r ".services[${i}].toolchain_binding.name" "${OLD_TOOLCHAIN_JSON_FILE}")
     if [ -z "${BINDING_NAME}" ] || [ 'null' = "${BINDING_NAME}" ] ; then
        # some service do not have toolchainbinding name such as private worker
        # add the service id as the suffix to prevent collision/override
         PREFIX_NUM=$( echo "0${i}" | sed -E 's/0*(.*..)$/\1/' )
         BINDING_NAME="${SERVICE_ID}${PREFIX_NUM}"
     fi
-
-    SERVICE_NAME=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].parameters.name")
+    SERVICE_NAME=$(jq -r ".services[${i}].parameters.name" "${OLD_TOOLCHAIN_JSON_FILE}")
     if [ -z "${SERVICE_NAME}" ] || [ 'null' = "$SERVICE_NAME" ] ; then
       SERVICE_NAME="$BINDING_NAME"
     fi
-
-    REPO_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].parameters.repo_url")
+    REPO_URL=$(jq -r ".services[${i}].parameters.repo_url" "${OLD_TOOLCHAIN_JSON_FILE}")
     if [ -z "${REPO_URL}" ] || [ 'null' = "${REPO_URL}" ]; then
         REPO_URL="";
     fi
@@ -437,8 +462,6 @@ REPO_DETAILS=$( echo "${SERVICE_DETAILS}" | grep --invert-match " $" | awk '{pri
 # echo "REPO_DETAILS is: ${NEWLINE}${REPO_DETAILS}"
 # echo "REPO_DETAILS end"
 
-# DEBUG
-#yq read "${YQ_PRETTY_PRINT}" "${OLD_TOOLCHAIN_JSON_FILE}"
 
 PIPELINE_FILE_NAMES=""
 
@@ -446,15 +469,14 @@ for((i=0; 1 ;i++))
 do
     # 'services[0].service_id' is like:
     # orion
-    SERVICE_ID=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].service_id")
+    SERVICE_ID=$(jq -r ".services[${i}].service_id" "${OLD_TOOLCHAIN_JSON_FILE}")
     if [ -z "${SERVICE_ID}" ] || [ 'null' = "${SERVICE_ID}" ] ; then
         break;
     fi
     # echo "Found $i: ${SERVICE_ID}"
     # 'services[0].instance_id' is like:
     # 44850da0-b5aa-4332-890c-1f8e6a48691c
-    SERVICE_INSTANCE_ID=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].instance_id")
-
+    SERVICE_INSTANCE_ID=$(jq -r ".services[${i}].instance_id" "${OLD_TOOLCHAIN_JSON_FILE}")
     # read the SERVICE_NAME from SERVICE_DETAILS - will have converted null to a value.
     SERVICE_NAME=$( echo "${SERVICE_DETAILS}" | grep "${SERVICE_INSTANCE_ID}" | awk '{print $2}' )
     # echo "Found $i: ${SERVICE_ID} ${SERVICE_NAME}"
@@ -463,26 +485,33 @@ do
     # container_url: ""
     # toolchain_id: e822e0f8-8e75-4420-962a-879f4f75c26b
     # dashboard_url: /devops/code/edit/edit.html#,toolchain=e822e0f8-8e75-4420-962a-879f4f75c26b
-    SERVICE_PARAMETERS=$(yq read "${YQ_PRETTY_PRINT}" "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].parameters")
-
-    SERVICE_FILE_NAME="tmp.service_${i}.yml"
-
+    SERVICE_FILE_NAME_JSON="tmp.service_${i}.json"
     # Start with service parameters list:
-    echo "${SERVICE_PARAMETERS}" > "${SERVICE_FILE_NAME}"
-
+    jq -r ".services[${i}].parameters" "${OLD_TOOLCHAIN_JSON_FILE}" > $SERVICE_FILE_NAME_JSON
+    SERVICE_FILE_NAME="tmp.service_${i}.yml"
     # Delete initial configuration content for the service
-    yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.content"
-
-    # Delete initial configuration env for the service
-    yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.env"
+    if [ "$OLD_YQ_VERSION" = true ] ; then
+      yq read "${YQ_PRETTY_PRINT}" "${SERVICE_FILE_NAME_JSON}" > "${SERVICE_FILE_NAME}"
+      yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.content"
+      # Delete initial configuration env for the service
+      yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.env"
+    else
+      yq -o yaml -P "${SERVICE_FILE_NAME_JSON}" > "${SERVICE_FILE_NAME}"
+      yq -i 'del(.. | select(has("configuration.content")).configuration.content)' "${SERVICE_FILE_NAME}"
+      yq -i 'del(.. | select(has("configuration.env")).configuration.env)' "${SERVICE_FILE_NAME}"
+    fi
 
     if [ 'pipeline' = "${SERVICE_ID}"  ] ; then
         # if pipeline, extra work
-        PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq read - type)
+        if [ "$OLD_YQ_VERSION" = true ] ; then
+          PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq read - type)
+        else
+          PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq '.type')
+        fi
         if [ "tekton" == "$PIPELINE_TYPE" ]; then
           # if tekton pipeline, extra work
-          SERVICE_DASHBOARD_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].dashboard_url")
-          SERVICE_REGION_ID=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].region_id")
+          SERVICE_DASHBOARD_URL=$(jq -r ".services[${i}].dashboard_url" "${OLD_TOOLCHAIN_JSON_FILE}")
+          SERVICE_REGION_ID=$(jq -r ".services[${i}].region_id" "${OLD_TOOLCHAIN_JSON_FILE}")
           PIPELINE_EXTERNAL_API_URL="$(echo $TOOLCHAIN_URL | awk -F/ '{print $1"//"$3}')${SERVICE_DASHBOARD_URL}/yaml?env_id=${SERVICE_REGION_ID}"
 
           TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
@@ -491,10 +520,14 @@ do
 
           PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
           PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
-
           # Find the list of git services defined in the inputs section
-          yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' > tmp-git-services-list.txt
-          yq read "${PIPELINE_FILE_NAME}" 'triggers[*].service' >> tmp-git-services-list.txt
+          if [ "$OLD_YQ_VERSION" = true ] ; then
+            yq read "${PIPELINE_FILE_NAME}" 'inputs[*].service' > tmp-git-services-list.txt
+            yq read "${PIPELINE_FILE_NAME}" 'triggers[*].service' >> tmp-git-services-list.txt
+          else
+            yq '[.inputs[].service]' "${PIPELINE_FILE_NAME}" > tmp-git-services-list.txt
+            yq '[.triggers[].service]' "${PIPELINE_FILE_NAME}" >> tmp-git-services-list.txt
+          fi
           GIT_SERVICES_LIST=$(cat tmp-git-services-list.txt \
             | grep --invert-match "^- null$" \
             | grep --invert-match "^null$" \
@@ -507,7 +540,11 @@ do
           # echo "GIT_SERVICES_LIST end"
 
           # Find the private worker service if needed
-          PRIVATE_WORKER_SERVICE=$(yq read "${PIPELINE_FILE_NAME}" 'private_worker')
+          if [ "$OLD_YQ_VERSION" = true ] ; then
+            PRIVATE_WORKER_SERVICE=$(yq read "${PIPELINE_FILE_NAME}" 'private_worker')
+          else
+            PRIVATE_WORKER_SERVICE=$(yq '.private_worker' "${PIPELINE_FILE_NAME}")
+          fi
           if [ -z "$PRIVATE_WORKER_SERVICE" ] || [ "$PRIVATE_WORKER_SERVICE" == "null" ] ; then
             PRIVATE_WORKER_SERVICE=""
           else
@@ -530,9 +567,13 @@ do
               | sort --unique )
             ENV_ENTRY_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
             echo "${ENV_ENTRY_LIST}" > "${ENV_ENTRY_LIST_FILE}"
-            yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
-            yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
-            # rm "${ENV_ENTRY_LIST_FILE}"
+            if [ "$OLD_YQ_VERSION" = true ] ; then
+              yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
+              yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            else
+              yq -i '{"configuration" : { "env": .}}' "${ENV_ENTRY_LIST_FILE}"
+              yq -i eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            fi
           fi
 
           # Insert env entry for the private worker service if needed
@@ -540,8 +581,13 @@ do
           if [ "${PRIVATE_WORKER_SERVICE}" ]; then
             ENV_ENTRY_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
             echo "${PRIVATE_WORKER_SERVICE}: '{{services.${PRIVATE_WORKER_SERVICE}.parameters.name}}'" > "${ENV_ENTRY_LIST_FILE}"
-            yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
-            yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            if [ "$OLD_YQ_VERSION" = true ] ; then
+              yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
+              yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            else
+              yq -i '{"configuration" : { "env" : . }}' "${ENV_ENTRY_LIST_FILE}"
+              yq -i eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            fi
             # rm "${ENV_ENTRY_LIST_FILE}"
             SERVICES_LIST="${GIT_SERVICES_LIST}${NEWLINE}- ${PRIVATE_WORKER_SERVICE}"
           else
@@ -551,11 +597,15 @@ do
         else
           # default to classic pipeline extra work
           if [ 'true' = "${PUBLIC_CLOUD}"  ] ; then
-            SERVICE_DASHBOARD_URL=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].dashboard_url")
-            SERVICE_REGION_ID=$(yq read "${OLD_TOOLCHAIN_JSON_FILE}" "services[${i}].region_id")
+            SERVICE_DASHBOARD_URL=$(jq -r ".services[${i}].dashboard_url" "${OLD_TOOLCHAIN_JSON_FILE}")
+            SERVICE_REGION_ID=$(jq -r ".services[${i}].region_id" "${OLD_TOOLCHAIN_JSON_FILE}")
             PIPELINE_EXTERNAL_API_URL=$(echo "${TOOLCHAIN_URL}" | awk -F/ '{print $1"//"$3}' )"${SERVICE_DASHBOARD_URL}/yaml?env_id=${SERVICE_REGION_ID}"
           else # dedicated
-            PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - api_url)
+            if [ "$OLD_YQ_VERSION" = true ] ; then
+              PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - api_url)
+            else
+              PIPELINE_EXTERNAL_API_URL=$( yq ".api_url" "${SERVICE_PARAMETERS}")
+            fi
           fi
           TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
           download_classic_pipeline "${PIPELINE_EXTERNAL_API_URL}" "${SERVICE_INSTANCE_ID}" "${TARGET_PIPELINE_ID}" "${REPO_DETAILS}" "${SERVICE_DETAILS}"
@@ -563,26 +613,45 @@ do
           PIPELINE_FILE_NAME="${TARGET_PIPELINE_ID}.yml"
           PIPELINE_FILE_NAMES="${PIPELINE_FILE_NAMES},${PIPELINE_FILE_NAME}"
 
-          FOUND_EXECUTE=$( yq read "${SERVICE_FILE_NAME}" 'configuration.execute' )
-          if [ "${FOUND_EXECUTE}" ] && [ 'null' != "${FOUND_EXECUTE}" ] ; then
-            yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.execute"
-          fi
+          if [ "$OLD_YQ_VERSION" = true ] ; then
+            FOUND_EXECUTE=$( yq read "${SERVICE_FILE_NAME}" 'configuration.execute' )
+            if [ "${FOUND_EXECUTE}" ] && [ 'null' != "${FOUND_EXECUTE}" ] ; then
+              yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.execute"
+            fi
 
-          GIT_SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
-            | grep --invert-match "^- - null$" \
-            | grep --invert-match "^- null$" \
-            | grep --invert-match "^null$" \
-            | grep --invert-match "^$" \
-            | sed -E 's/- - //' \
-            | sed -E 's/- //' \
-            | sed -E 's/^/- /' \
-            | sort --unique )
+            GIT_SERVICES_LIST=$(yq read "${PIPELINE_FILE_NAME}" 'stages[*].inputs[*].service' \
+              | grep --invert-match "^- - null$" \
+              | grep --invert-match "^- null$" \
+              | grep --invert-match "^null$" \
+              | grep --invert-match "^$" \
+              | sed -E 's/- - //' \
+              | sed -E 's/- //' \
+              | sed -E 's/^/- /' \
+              | sort --unique )
+            # Find the private worker services referenced in this pipeline
+            PW_LIST="- $(yq read ${PIPELINE_FILE_NAME} 'private_worker')${NEWLINE}$(yq read ${PIPELINE_FILE_NAME} 'stages[*].worker')"
+          else
+            FOUND_EXECUTE=$( yq '.configuration.execute' "${SERVICE_FILE_NAME}")
+            if [ "${FOUND_EXECUTE}" ] && [ 'null' != "${FOUND_EXECUTE}" ] ; then
+              yq -i 'del(.. | select(has("configuration.execute")).configuration.execute)' "${SERVICE_FILE_NAME}"
+            fi
+
+            GIT_SERVICES_LIST=$(yq '.stages[].inputs[].service' "${PIPELINE_FILE_NAME}" \
+              | grep --invert-match "^- - null$" \
+              | grep --invert-match "^- null$" \
+              | grep --invert-match "^null$" \
+              | grep --invert-match "^$" \
+              | sed -E 's/- - //' \
+              | sed -E 's/- //' \
+              | sed -E 's/^/- /' \
+              | sort --unique )
+            # Find the private worker services referenced in this pipeline
+            PW_LIST="- $(yq '.private_worker' "${PIPELINE_FILE_NAME}")${NEWLINE}$(yq '.stages[].worker' "${PIPELINE_FILE_NAME}")"
+          fi
           # echo "GIT_SERVICES_LIST is:"
           # echo "${GIT_SERVICES_LIST}"
           # echo "GIT_SERVICES_LIST end"
 
-          # Find the private worker services referenced in this pipeline
-          PW_LIST="- $(yq read ${PIPELINE_FILE_NAME} 'private_worker')${NEWLINE}$(yq read ${PIPELINE_FILE_NAME} 'stages[*].worker')"
           PRIVATE_WORKER_SERVICES=$( echo "$PW_LIST" \
             | grep --invert-match "^- null$" \
             | grep --invert-match "^- $" \
@@ -602,8 +671,13 @@ do
             do
               echo "${private_worker_service}: '{{services.${private_worker_service}.parameters.name}}'" >> "${ENV_ENTRY_LIST_FILE}"
             done
-            yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
-            yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            if [ "$OLD_YQ_VERSION" = true ] ; then
+              yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
+              yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            else
+              yq -i '{"configuration" : { "env" : . }' "${ENV_ENTRY_LIST_FILE}"
+              yq -i eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
+            fi
             # rm "${ENV_ENTRY_LIST_FILE}"
             PRIVATE_WORKER_SERVICES_LIST=$( echo "$PRIVATE_WORKER_SERVICES" \
               | sed -E 's/^/- /' )
@@ -614,8 +688,11 @@ do
         fi
 
         # Insert the reference to pipeline content file in the pipeline service definition
-        yq write "${YQ_PRETTY_PRINT}" --inplace "${SERVICE_FILE_NAME}" "configuration.content.\$text" "${PIPELINE_FILE_NAME}"
-
+        if [ "$OLD_YQ_VERSION" = true ] ; then
+          yq write "${YQ_PRETTY_PRINT}" --inplace "${SERVICE_FILE_NAME}" "configuration.content.\$text" "${PIPELINE_FILE_NAME}"
+        else
+          yq -i -P ".configuration = { \"content\" : {\"\$text\" : \"${PIPELINE_FILE_NAME}\"}}" "${SERVICE_FILE_NAME}"
+        fi
         # Insert services list (git or private workers) into parameters, like:
         #   service_id: pipeline
         #   parameters:
@@ -625,9 +702,15 @@ do
         if [ "${SERVICES_LIST}" ] ; then
           SERVICES_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_services.yml"
           echo "${SERVICES_LIST}" > "${SERVICES_LIST_FILE}"
-          yq prefix --inplace "${SERVICES_LIST_FILE}" "services"
-          yq delete --inplace "${SERVICE_FILE_NAME}" "services"
-          yq merge --inplace "${SERVICE_FILE_NAME}" "${SERVICES_LIST_FILE}"
+          if [ "$OLD_YQ_VERSION" = true ] ; then
+            yq prefix --inplace "${SERVICES_LIST_FILE}" "services"
+            yq delete --inplace "${SERVICE_FILE_NAME}" "services"
+            yq merge --inplace "${SERVICE_FILE_NAME}" "${SERVICES_LIST_FILE}"
+          else
+            yq -i '{ "services" : . }' "${SERVICES_LIST_FILE}"
+            yq -i 'del(.. | select(has("services")).services)' "${SERVICE_FILE_NAME}"
+            yq -i eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "${SERVICE_FILE_NAME}" "${SERVICES_LIST_FILE}"
+          fi
           # rm "${SERVICES_LIST_FILE}"
         fi
     fi
@@ -640,36 +723,53 @@ do
       PROPERTY_TYPE=$( echo "${SERVICE_BROKERS}" |  jq -r  --arg service_id "${SERVICE_ID}" --arg property_name "${property_name}" \
         '.service_brokers[] | select( .entity.unique_id == $service_id ) | .metadata.parameters.properties[$property_name] | select(type == "object") | .type' )
       if [ "${PROPERTY_TYPE}" = "password"  ] ; then
-        FOUND=$( yq read "${SERVICE_FILE_NAME}" "${property_name}" )
-        if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+        if [ "$OLD_YQ_VERSION" = true ] ; then
+          FOUND=$( yq read "${SERVICE_FILE_NAME}" "${property_name}" )
+          if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
           # echo "password property found: ${SERVICE_NAME} ${property_name}"
-          yq write --inplace "${SERVICE_FILE_NAME}" "${property_name}" ""
+            yq write --inplace "${SERVICE_FILE_NAME}" "${property_name}" ""
+          fi
+        else
+          FOUND=$( yq ".${property_name}" "${SERVICE_FILE_NAME}" )
+          if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+          # echo "password property found: ${SERVICE_NAME} ${property_name}"
+            yq -i ".${property_name} = \"\"" "${SERVICE_FILE_NAME}"
+          fi
         fi
       fi
     done
     if [ 'private_worker' = "${SERVICE_ID}"  ] ; then
-        FOUND=$( yq read "${SERVICE_FILE_NAME}" 'workerQueueCredentials' )
-        if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
-          yq write --inplace "${SERVICE_FILE_NAME}" "workerQueueCredentials" ""
+        if [ "$OLD_YQ_VERSION" = true ] ; then
+          FOUND=$( yq read "${SERVICE_FILE_NAME}" 'workerQueueCredentials' )
+          if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+            yq write --inplace "${SERVICE_FILE_NAME}" "workerQueueCredentials" ""
+          fi
+        else
+          FOUND=$( yq '.workerQueueCredentials' "${SERVICE_FILE_NAME}" )
+          if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+            yq -i '.workerQueueCredentials = ""' "${SERVICE_FILE_NAME}"
+          fi
         fi
     fi
-    # paranoia, other properties not declared with type: password, but repressing due to name is suspicious:
-    FOUND=$( yq read "${SERVICE_FILE_NAME}" 'token' )
-    if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
-      yq write --inplace "${SERVICE_FILE_NAME}" "token" ""
-    fi
-    FOUND=$( yq read "${SERVICE_FILE_NAME}" 'access_token' )
-    if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
-      yq write --inplace "${SERVICE_FILE_NAME}" "access_token" ""
-    fi
-    FOUND=$( yq read "${SERVICE_FILE_NAME}" 'api_token' )
-    if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
-      yq write --inplace "${SERVICE_FILE_NAME}" "api_token" ""
-    fi
-    FOUND=$( yq read "${SERVICE_FILE_NAME}" 'password' )
-    if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
-      yq write --inplace "${SERVICE_FILE_NAME}" "password" ""
-    fi
+
+    if [ "$OLD_YQ_VERSION" = true ] ; then
+      # paranoia, other properties not declared with type: password, but repressing due to name is suspicious:
+      FOUND=$( yq read "${SERVICE_FILE_NAME}" 'token' )
+      if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+        yq write --inplace "${SERVICE_FILE_NAME}" "token" ""
+      fi
+      FOUND=$( yq read "${SERVICE_FILE_NAME}" 'access_token' )
+      if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+        yq write --inplace "${SERVICE_FILE_NAME}" "access_token" ""
+      fi
+      FOUND=$( yq read "${SERVICE_FILE_NAME}" 'api_token' )
+      if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+        yq write --inplace "${SERVICE_FILE_NAME}" "api_token" ""
+      fi
+      FOUND=$( yq read "${SERVICE_FILE_NAME}" 'password' )
+      if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+        yq write --inplace "${SERVICE_FILE_NAME}" "password" ""
+      fi
 
     # build these up in reverse order (parameters, then service_id, then service_name, services):
     # services:
@@ -678,15 +778,52 @@ do
     #     parameters:
     #       api_url: http://pipeline-service/pipeline/pipelines/0101140f-4082-4709-9c05-5739cefa558a
     #       external_api_url: https://pipeline-service.us-east.devops.cloud.ibm.com/pipeline/pipelines/0101140f-4082-4709-9c05-5739cefa558a
-    yq prefix --inplace "${SERVICE_FILE_NAME}" "parameters"
-    yq write --inplace "${SERVICE_FILE_NAME}" "service_id" "${SERVICE_ID}"
-    yq prefix --inplace "${SERVICE_FILE_NAME}" "${SERVICE_NAME}"
-    yq prefix --inplace "${SERVICE_FILE_NAME}" "services"
+      yq prefix --inplace "${SERVICE_FILE_NAME}" "parameters"
+      yq write --inplace "${SERVICE_FILE_NAME}" "service_id" "${SERVICE_ID}"
+      yq prefix --inplace "${SERVICE_FILE_NAME}" "${SERVICE_NAME}"
+      yq prefix --inplace "${SERVICE_FILE_NAME}" "services"
     # echo " == [${i}] has: =="
     # cat "${SERVICE_FILE_NAME}"
     # echo " == /end ${i} =SERVICE_NAME="
-    yq merge --inplace "${TOOLCHAIN_YML_FILE_NAME}" "${SERVICE_FILE_NAME}"
+      yq merge --inplace "${TOOLCHAIN_YML_FILE_NAME}" "${SERVICE_FILE_NAME}"
     # rm "${SERVICE_FILE_NAME}"
+  else
+      # paranoia, other properties not declared with type: password, but repressing due to name is suspicious:
+      FOUND=$( yq '.token' "${SERVICE_FILE_NAME}" )
+      if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+        yq -i '.token  = ""' "${SERVICE_FILE_NAME}"
+      fi
+      FOUND=$( yq '.access_token' "${SERVICE_FILE_NAME}" )
+      if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+        yq -i '.access_token = ""' "${SERVICE_FILE_NAME}"
+      fi
+      FOUND=$( yq '.api_token' "${SERVICE_FILE_NAME}" )
+      if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+        yq -i '.api_token = ""' "${SERVICE_FILE_NAME}"
+      fi
+      FOUND=$( yq '.password' "${SERVICE_FILE_NAME}" )
+      if [ "${FOUND}" ] && [ 'null' != "${FOUND}" ]; then
+        yq -i '.password = ""' "${SERVICE_FILE_NAME}"
+      fi
+
+    # build these up in reverse order (parameters, then service_id, then service_name, services):
+    # services:
+    #   sample-build:
+    #     service_id: pipeline
+    #     parameters:
+    #       api_url: http://pipeline-service/pipeline/pipelines/0101140f-4082-4709-9c05-5739cefa558a
+    #       external_api_url: https://pipeline-service.us-east.devops.cloud.ibm.com/pipeline/pipelines/0101140f-4082-4709-9c05-5739cefa558a
+      yq -i '{ "parameters" : . }' "${SERVICE_FILE_NAME}"
+      yq -i ".service_id = \"${SERVICE_ID}\"" "${SERVICE_FILE_NAME}"
+      yq -i "{ \"${SERVICE_NAME}\" : . }" "${SERVICE_FILE_NAME}"
+      yq -i '{ "services" : . }' "${SERVICE_FILE_NAME}"
+    # echo " == [${i}] has: =="
+    # cat "${SERVICE_FILE_NAME}"
+    # echo " == /end ${i} =SERVICE_NAME="
+      yq -i eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "${TOOLCHAIN_YML_FILE_NAME}" "${SERVICE_FILE_NAME}"
+    # rm "${SERVICE_FILE_NAME}"
+  fi  
+
 done
 
 # under template, add the required services
@@ -695,12 +832,22 @@ done
 #   required:
 #   - sample-repo
 #   - private-worker
-REQUIRED_SERVICES=$( yq read -j "${TOOLCHAIN_YML_FILE_NAME}" | jq -r '.services[]? | .parameters | .services[]? | .' | sort -u )
+if [ "$OLD_YQ_VERSION" = true ] ; then
+  REQUIRED_SERVICES=$( yq read -j "${TOOLCHAIN_YML_FILE_NAME}" | jq -r '.services[]? | .parameters | .services[]? | .' | sort -u )
+else
+  REQUIRED_SERVICES=$( yq -o json "${TOOLCHAIN_YML_FILE_NAME}" | jq -r '.services[]? | .parameters | .services[]? | .' | sort -u )
+fi
 #echo "REQUIRED_SERVICES=$REQUIRED_SERVICES"
 if [ "${REQUIRED_SERVICES}" ] ; then
-  echo "${REQUIRED_SERVICES}" | awk '{print "- "$1}' \
-  | yq prefix - "template.required" \
-  | yq merge --inplace "${TOOLCHAIN_YML_FILE_NAME}" -
+  if [ "$OLD_YQ_VERSION" = true ] ; then
+    echo "${REQUIRED_SERVICES}" | awk '{print "- "$1}' \
+    | yq prefix - "template.required" \
+    | yq merge --inplace "${TOOLCHAIN_YML_FILE_NAME}" -
+  else
+    echo "${REQUIRED_SERVICES}" | awk '{print "- "$1}' > required_service.yaml
+    yq -i '{ "template" : { "required" : . }}' required_service.yaml
+    yq -i eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "${TOOLCHAIN_YML_FILE_NAME}" required_service.yaml
+  fi
 else
   echo "WARNING, no used repository tool found, so not marked required, browser will give error for template with no required service."
 fi
