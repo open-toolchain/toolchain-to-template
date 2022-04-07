@@ -504,9 +504,9 @@ do
     if [ 'pipeline' = "${SERVICE_ID}"  ] ; then
         # if pipeline, extra work
         if [ "$OLD_YQ_VERSION" = true ] ; then
-          PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq read - type)
+          PIPELINE_TYPE=$(cat "$SERVICE_FILE_NAME" | yq read - type)
         else
-          PIPELINE_TYPE=$(echo "$SERVICE_PARAMETERS" | yq '.type')
+          PIPELINE_TYPE=$(cat "$SERVICE_FILE_NAME" | yq '.type')
         fi
         if [ "tekton" == "$PIPELINE_TYPE" ]; then
           # if tekton pipeline, extra work
@@ -602,9 +602,9 @@ do
             PIPELINE_EXTERNAL_API_URL=$(echo "${TOOLCHAIN_URL}" | awk -F/ '{print $1"//"$3}' )"${SERVICE_DASHBOARD_URL}/yaml?env_id=${SERVICE_REGION_ID}"
           else # dedicated
             if [ "$OLD_YQ_VERSION" = true ] ; then
-              PIPELINE_EXTERNAL_API_URL=$(echo "${SERVICE_PARAMETERS}" | yq read - api_url)
+              PIPELINE_EXTERNAL_API_URL=$(cat "$SERVICE_FILE_NAME" | yq read - api_url)
             else
-              PIPELINE_EXTERNAL_API_URL=$( yq ".api_url" "${SERVICE_PARAMETERS}")
+              PIPELINE_EXTERNAL_API_URL=$(cat "$SERVICE_FILE_NAME" | yq '.api_url')
             fi
           fi
           TARGET_PIPELINE_ID="pipeline_${SERVICE_NAME}"
