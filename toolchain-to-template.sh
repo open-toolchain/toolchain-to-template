@@ -624,6 +624,7 @@ do
               | grep --invert-match "^- - null$" \
               | grep --invert-match "^- null$" \
               | grep --invert-match "^null$" \
+              | grep --invert-match "^\[\]" \
               | grep --invert-match "^$" \
               | sed -E 's/- - //' \
               | sed -E 's/- //' \
@@ -676,7 +677,7 @@ do
               yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
               yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             else
-              yq -i '{"configuration" : { "env" : . }' "${ENV_ENTRY_LIST_FILE}"
+              yq -i '{"configuration" : { "env" : . }}' "${ENV_ENTRY_LIST_FILE}"
               yq -i eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             fi
             # rm "${ENV_ENTRY_LIST_FILE}"
@@ -881,5 +882,5 @@ done
 
 cd ..
 set +x
-if [ -z "${DEBUG_TTT}" ]; then rm -rf ${WORKDIR} ; fi
+#if [ -z "${DEBUG_TTT}" ]; then rm -rf ${WORKDIR} ; fi
 echo "Template extraction from toolchain '${TOOLCHAIN_NAME}' done"
