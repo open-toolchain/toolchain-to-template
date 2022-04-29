@@ -882,5 +882,5 @@ done
 
 cd ..
 set +x
-#if [ -z "${DEBUG_TTT}" ]; then rm -rf ${WORKDIR} ; fi
+if [ -z "${DEBUG_TTT}" ]; then rm -rf ${WORKDIR} ; fi
 echo "Template extraction from toolchain '${TOOLCHAIN_NAME}' done"
