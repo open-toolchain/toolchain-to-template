@@ -534,6 +534,7 @@ do
             | grep --invert-match "^$" \
             | awk '-F{' '{print $2}' \
             | awk '-F}' '{print "- "$1}' \
+            | grep --invert-match "^- $" \
             | sort --unique )
           # echo "GIT_SERVICES_LIST is:"
           # echo "${GIT_SERVICES_LIST}"
@@ -563,7 +564,8 @@ do
               | grep --invert-match "^null$" \
               | grep --invert-match "^$" \
               | awk '-F{' '{print $2}' \
-              | awk '-F}' '{print $1": "$1}' \
+              | awk '-F}' '{print "- "$1}' \
+              | grep --invert-match "^- $" \
               | sort --unique )
             ENV_ENTRY_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
             echo "${ENV_ENTRY_LIST}" > "${ENV_ENTRY_LIST_FILE}"
@@ -691,7 +693,7 @@ do
         if [ "$OLD_YQ_VERSION" = true ] ; then
           yq write "${YQ_PRETTY_PRINT}" --inplace "${SERVICE_FILE_NAME}" "configuration.content.\$text" "${PIPELINE_FILE_NAME}"
         else
-          yq -i -P ".configuration.content : {\"\$text\" : \"${PIPELINE_FILE_NAME}\"}" "${SERVICE_FILE_NAME}"
+          yq -i -P ".configuration.content = {\"\$text\" : \"${PIPELINE_FILE_NAME}\"}" "${SERVICE_FILE_NAME}"
         fi
         # Insert services list (git or private workers) into parameters, like:
         #   service_id: pipeline
