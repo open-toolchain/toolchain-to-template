@@ -532,6 +532,7 @@ do
             | grep --invert-match "^- null$" \
             | grep --invert-match "^null$" \
             | grep --invert-match "^$" \
+            | grep --invert-match "^\[\]" \
             | awk '-F{' '{print $2}' \
             | awk '-F}' '{print "- "$1}' \
             | sort --unique )
@@ -566,7 +567,7 @@ do
               | awk '-F}' '{print $1": "$1}' \
               | sort --unique )
             ENV_ENTRY_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
-            echo "${ENV_ENTRY_LIST}" > "${ENV_ENTRY_LIST_FILE}"
+            echo "${ENV_ENTRY_LIST}" | grep --invert-match "^\:" > "${ENV_ENTRY_LIST_FILE}"
             if [ "$OLD_YQ_VERSION" = true ] ; then
               yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
               yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
@@ -585,7 +586,7 @@ do
               yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
               yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             else
-              yq -i '{"configuration" : { "env" : . }}' "${ENV_ENTRY_LIST_FILE}"
+              yq -i '{"configuration" : { "env": .}}' "${ENV_ENTRY_LIST_FILE}"
               yq -i eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             fi
             # rm "${ENV_ENTRY_LIST_FILE}"
@@ -623,6 +624,7 @@ do
               | grep --invert-match "^- - null$" \
               | grep --invert-match "^- null$" \
               | grep --invert-match "^null$" \
+              | grep --invert-match "^\[\]" \
               | grep --invert-match "^$" \
               | sed -E 's/- - //' \
               | sed -E 's/- //' \
@@ -675,7 +677,7 @@ do
               yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
               yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             else
-              yq -i '{"configuration" : { "env" : . }' "${ENV_ENTRY_LIST_FILE}"
+              yq -i '{"configuration" : { "env" : . }}' "${ENV_ENTRY_LIST_FILE}"
               yq -i eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             fi
             # rm "${ENV_ENTRY_LIST_FILE}"
@@ -691,7 +693,7 @@ do
         if [ "$OLD_YQ_VERSION" = true ] ; then
           yq write "${YQ_PRETTY_PRINT}" --inplace "${SERVICE_FILE_NAME}" "configuration.content.\$text" "${PIPELINE_FILE_NAME}"
         else
-          yq -i -P ".configuration.content : {\"\$text\" : \"${PIPELINE_FILE_NAME}\"}" "${SERVICE_FILE_NAME}"
+          yq -i -P ".configuration.content = {\"\$text\" : \"${PIPELINE_FILE_NAME}\"}" "${SERVICE_FILE_NAME}"
         fi
         # Insert services list (git or private workers) into parameters, like:
         #   service_id: pipeline
