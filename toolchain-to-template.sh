@@ -532,9 +532,9 @@ do
             | grep --invert-match "^- null$" \
             | grep --invert-match "^null$" \
             | grep --invert-match "^$" \
+            | grep --invert-match "^\[\]" \
             | awk '-F{' '{print $2}' \
             | awk '-F}' '{print "- "$1}' \
-            | grep --invert-match "^- $" \
             | sort --unique )
           # echo "GIT_SERVICES_LIST is:"
           # echo "${GIT_SERVICES_LIST}"
@@ -564,11 +564,10 @@ do
               | grep --invert-match "^null$" \
               | grep --invert-match "^$" \
               | awk '-F{' '{print $2}' \
-              | awk '-F}' '{print "- "$1}' \
-              | grep --invert-match "^- $" \
+              | awk '-F}' '{print $1": "$1}' \
               | sort --unique )
             ENV_ENTRY_LIST_FILE="tmp.${TARGET_PIPELINE_ID}_env_services.yml"
-            echo "${ENV_ENTRY_LIST}" > "${ENV_ENTRY_LIST_FILE}"
+            echo "${ENV_ENTRY_LIST}" | grep --invert-match "^\:" > "${ENV_ENTRY_LIST_FILE}"
             if [ "$OLD_YQ_VERSION" = true ] ; then
               yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
               yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
@@ -587,7 +586,7 @@ do
               yq prefix --inplace "${ENV_ENTRY_LIST_FILE}" "configuration.env"
               yq merge --inplace "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             else
-              yq -i '{"configuration" : { "env" : . }}' "${ENV_ENTRY_LIST_FILE}"
+              yq -i '{"configuration" : { "env": .}}' "${ENV_ENTRY_LIST_FILE}"
               yq -i eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "${SERVICE_FILE_NAME}" "${ENV_ENTRY_LIST_FILE}"
             fi
             # rm "${ENV_ENTRY_LIST_FILE}"
@@ -882,5 +881,5 @@ done
 
 cd ..
 set +x
-if [ -z "${DEBUG_TTT}" ]; then rm -rf ${WORKDIR} ; fi
+#if [ -z "${DEBUG_TTT}" ]; then rm -rf ${WORKDIR} ; fi
 echo "Template extraction from toolchain '${TOOLCHAIN_NAME}' done"
