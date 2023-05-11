@@ -489,16 +489,13 @@ do
     # Start with service parameters list:
     jq -r ".services[${i}].parameters" "${OLD_TOOLCHAIN_JSON_FILE}" > $SERVICE_FILE_NAME_JSON
     SERVICE_FILE_NAME="tmp.service_${i}.yml"
-    # Delete initial configuration content for the service
+    # Delete initial configuration for the service
     if [ "$OLD_YQ_VERSION" = true ] ; then
       yq read "${YQ_PRETTY_PRINT}" "${SERVICE_FILE_NAME_JSON}" > "${SERVICE_FILE_NAME}"
-      yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.content"
-      # Delete initial configuration env for the service
-      yq delete --inplace "${SERVICE_FILE_NAME}" "configuration.env"
+      yq delete --inplace "${SERVICE_FILE_NAME}" "configuration"
     else
       yq -o yaml -P "${SERVICE_FILE_NAME_JSON}" > "${SERVICE_FILE_NAME}"
-      yq -i 'del(.. | select(has("configuration.content")).configuration.content)' "${SERVICE_FILE_NAME}"
-      yq -i 'del(.. | select(has("configuration.env")).configuration.env)' "${SERVICE_FILE_NAME}"
+      yq -i 'del(.. | select(has("configuration")).configuration)' "${SERVICE_FILE_NAME}"
     fi
 
     if [ 'pipeline' = "${SERVICE_ID}"  ] ; then
