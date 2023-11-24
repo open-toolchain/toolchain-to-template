@@ -2,12 +2,12 @@
 
 The toolchain-to-template script takes a Toolchain URL and will generate an OTC Template in the current folder that when run creates a clone of you original toolchain. For example:
 ```
-./toolchain-to-template.sh https://cloud.ibm.com/devops/toolchains/2665ce98-ea71-43e8-b723-19bafdb7a541?env_id=ibm:yp:us-east
+./toolchain-to-template.sh "https://cloud.ibm.com/devops/toolchains/2665ce98-ea71-43e8-b723-19bafdb7a541?env_id=ibm:yp:us-east"
 ```
 
 ---
 ### SETUP
-1) The toolchain-to-template.sh script requires that the following utilities are pre-installed on your PATH: ibmcloud, curl, jq 1.6 or above (https://stedolan.github.io/jq/), and yq 4.x or 3.x or 2.x (https://github.com/mikefarah/yq) 
+1) The toolchain-to-template.sh script requires that the following utilities are pre-installed on your PATH: ibmcloud, curl, jq 1.6 or 1.7 (https://jqlang.github.io/jq/), and yq 4.x or 3.x or 2.x (https://github.com/mikefarah/yq) 
 2) Create a temporary work folder where the script will generate your template
 3) Download and copy `toolchain-to-template.sh` to your work folder
 4) Determine whether your toolchain is in the public cloud or in a dedicated environment.  
