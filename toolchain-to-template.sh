@@ -280,13 +280,13 @@ if [ -z "${TOOLCHAIN_URL}" ]; then
   exit 1
 fi
 
-WRONG_JQ=$( jq --version | grep "jq-1.6" )
+WRONG_JQ=$( jq --version | grep "jq-1\.[67]" )
 if [ -z "${WRONG_JQ}" ]; then
-  echo "Unexpected prereq 'jq --version' is not 'jq-1.6'"
+  echo "Unexpected prereq 'jq --version' is not 'jq-1.6' or 'jq-1.7'"
   exit 1
 fi
 
-WRONG_YQ=$( yq --version 2>&1 | grep "version [234]\." )
+WRONG_YQ=$( yq --version 2>&1 | grep -E "version v?[234]\." )
 export OLD_YQ_VERSION=false
 if [ -z "${WRONG_YQ}" ]; then
   echo "Unexpected prereq 'yq --version' is not 2.x or 3.x or 4.x"
