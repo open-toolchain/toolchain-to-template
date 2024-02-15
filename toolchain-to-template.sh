@@ -33,7 +33,6 @@
 
 BEARER_TOKEN=
 YQ_PRETTY_PRINT=
-secrets_needed=true
 
 function download_classic_pipeline() {
 
@@ -193,7 +192,7 @@ function download_tekton_pipeline() {
   echo ${PIPELINE_API_URL}
   echo ${SOURCE_PIPELINE_ID}
   echo "==="
-  if ${secrets_needed}; then
+  if ${secrets_needed} then
     python3 ../update_secure_value.py ${SOURCE_PIPELINE_ID} ${SOURCE_PIPELINE_ID}.yaml
   fi
   #("${SOURCE_PIPELINE_ID}","${SOURCE_PIPELINE_ID}".yaml)
