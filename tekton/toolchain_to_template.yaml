@@ -6,13 +6,9 @@ metadata:
 spec:
   params:
     - name: code_branch
-      default: tenable-enhancements
     - name: code_repository
-      default: https://github.ibm.com/org-ids/dbscan-analyzer.git
     - name: common_repo
-      default: https://github.ibm.com/org-ids/cat-common-python.git
     - name: common_branch
-      default: master
     - name: toolchain_link
     - name: template_org_repo
     - name: secrets_needed
@@ -86,13 +82,9 @@ metadata:
 spec:
   params:
     - name: code_branch
-      default: cat_analyzer
     - name: code_repository
-      default: https://github.ibm.com/new-trial-org/dbscan-analyzer.git
     - name: common_repo
-      default: https://github.ibm.com/org-ids/cat-common-python.git
     - name: common_branch
-      default: master
     - name: toolchain_link
     - name: template_org_repo
     - name: secrets_needed
@@ -165,13 +157,9 @@ metadata:
 spec:
   params:
     - name: code_branch
-      default: cat_analyzer
     - name: code_repository
-      default: https://github.ibm.com/new-trial-org/dbscan-analyzer.git
     - name: common_repo
-      default: https://github.ibm.com/org-ids/cat-common-python.git
     - name: common_branch
-      default: master
     - name: toolchain_link
     - name: template_org_repo
     - name: secrets_needed
