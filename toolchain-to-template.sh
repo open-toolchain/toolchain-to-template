@@ -33,6 +33,7 @@
 
 BEARER_TOKEN=
 YQ_PRETTY_PRINT=
+secrets_needed=true
 
 function download_classic_pipeline() {
 
@@ -46,7 +47,9 @@ function download_classic_pipeline() {
 
   echo 'Get classic pipeline content: curl -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml" ' ${PIPELINE_API_URL}
   curl -s -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}"
+  
 
+  echo ${SOURCE_PIPELINE_ID}
   # echo "YAML from source classic pipeline"
   # cat "${SOURCE_PIPELINE_ID}.yaml"
 
@@ -186,8 +189,14 @@ function download_tekton_pipeline() {
   # echo "YAML from source tekton pipeline"
   # echo "==="
   # cat "${SOURCE_PIPELINE_ID}.yaml"
-  # echo "==="
-
+  echo "==="
+  echo ${PIPELINE_API_URL}
+  echo ${SOURCE_PIPELINE_ID}
+  echo "==="
+  if ${secrets_needed}; then
+    python3 ../update_secure_value.py ${SOURCE_PIPELINE_ID} ${SOURCE_PIPELINE_ID}.yaml
+  fi
+  #("${SOURCE_PIPELINE_ID}","${SOURCE_PIPELINE_ID}".yaml)
   # convert the yaml to json
   if [ "$OLD_YQ_VERSION" = true ] ; then
     yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
@@ -280,13 +289,13 @@ if [ -z "${TOOLCHAIN_URL}" ]; then
   exit 1
 fi
 
-WRONG_JQ=$( jq --version | grep "jq-1.6" )
+WRONG_JQ=$( jq --version | grep "jq-1\.[67]" )
 if [ -z "${WRONG_JQ}" ]; then
-  echo "Unexpected prereq 'jq --version' is not 'jq-1.6'"
+  echo "Unexpected prereq 'jq --version' is not 'jq-1.6' or 'jq-1.7'"
   exit 1
 fi
 
-WRONG_YQ=$( yq --version 2>&1 | grep "version [234]\." )
+WRONG_YQ=$( yq --version 2>&1 | grep -E "version v?[234]\." )
 export OLD_YQ_VERSION=false
 if [ -z "${WRONG_YQ}" ]; then
   echo "Unexpected prereq 'yq --version' is not 2.x or 3.x or 4.x"
