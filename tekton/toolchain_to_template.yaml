@@ -16,6 +16,7 @@ spec:
     - name: toolchain_link
     - name: template_org_repo
     - name: secrets_needed
+    - name: toolchain_account_apikey
 
   resourcetemplates:
     - apiVersion: v1
@@ -51,6 +52,8 @@ spec:
             value: $(params.template_org_repo)
           - name: secrets_needed
             value: $(params.secrets_needed)
+          - name: toolchain_account_apikey
+            value: $(params.toolchain_account_apikey)
 
         workspaces:
           - name: pipeline-ws
@@ -93,6 +96,7 @@ spec:
     - name: toolchain_link
     - name: template_org_repo
     - name: secrets_needed
+    - name: toolchain_account_apikey
 
   workspaces:
     - name: pipeline-ws
@@ -146,6 +150,9 @@ spec:
           value: $(params.template_org_repo)
         - name: secrets_needed
           value: $(params.secrets_needed)
+        - name: toolchain_account_apikey
+          value: $(params.toolchain_account_apikey)
+
       workspaces:
         - name: output
           workspace: pipeline-ws
@@ -168,6 +175,7 @@ spec:
     - name: toolchain_link
     - name: template_org_repo
     - name: secrets_needed
+    - name: toolchain_account_apikey
   workspaces:
     - name: output
       mountPath: /artifacts
@@ -191,6 +199,8 @@ spec:
           value: $(params.template_org_repo)
         - name: secrets_needed
           value: $(params.secrets_needed)
+        - name: toolchain_account_apikey
+          value: $(params.toolchain_account_apikey)
 
         - name: PIPELINE_RUN_URL
           valueFrom:
@@ -211,4 +221,6 @@ spec:
           pip3 install -q -r repo2/requirements.txt 
           cp -r repo2/* ./
           cp -r repo1/* ./
+          ibmcloud login --apikey $toolchain_account_apikey --no-region;
+          ./toolchain-to-template.sh $toolchain_link
           ls
