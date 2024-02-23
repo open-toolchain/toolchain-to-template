@@ -1,8 +1,5 @@
-import os
 import json
 import ibmcloud
-import requests
-import yaml
 import ruamel.yaml
 import argparse
 
