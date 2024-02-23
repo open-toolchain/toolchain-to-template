@@ -1,0 +1,214 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: toolchain-duplication-template
+spec:
+  params:
+    - name: code_branch
+    - name: code_repository
+    - name: common_repo
+    - name: common_branch
+    - name: toolchain_link
+    - name: template_org_repo
+    - name: secrets_needed
+    - name: toolchain_account_apikey
+
+  resourcetemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: pipelinerun-$(uid)-pvc
+      spec:
+        resources:
+          requests:
+            storage: 5Gi
+        volumeMode: Filesystem
+        accessModes:
+          - ReadWriteOnce
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        name: pipelinerun-$(uid)
+      spec:
+        pipelineRef:
+          name: toolchain-duplication-pipeline
+        params:
+          - name: code_branch
+            value: $(params.code_branch)
+          - name: code_repository
+            value: $(params.code_repository)
+          - name: common_repo
+            value: $(params.common_repo)
+          - name: common_branch
+            value: $(params.common_branch)
+          - name: toolchain_link
+            value: $(params.toolchain_link)
+          - name: template_org_repo
+            value: $(params.template_org_repo)
+          - name: secrets_needed
+            value: $(params.secrets_needed)
+          - name: toolchain_account_apikey
+            value: $(params.toolchain_account_apikey)
+
+        workspaces:
+          - name: pipeline-ws
+            persistentVolumeClaim:
+              claimName: pipelinerun-$(uid)-pvc
+---
+apiVersion: tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: toolchain-duplication-binding
+spec:
+  params:
+
+---
+apiVersion: tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: toolchain-duplication-listener
+spec:
+  triggers:
+    - binding:
+        name: toolchain-duplication-binding
+      template:
+        name: toolchain-duplication-template
+---
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: toolchain-duplication-pipeline
+spec:
+  params:
+    - name: code_branch
+    - name: code_repository
+    - name: common_repo
+    - name: common_branch
+    - name: toolchain_link
+    - name: template_org_repo
+    - name: secrets_needed
+    - name: toolchain_account_apikey
+
+  workspaces:
+    - name: pipeline-ws
+
+  tasks:
+    - name: git-clone
+      taskRef:
+        name: git-clone-repo
+      params:
+        - name: repository
+          value: $(params.code_repository)
+        - name: branch
+          value: $(params.code_branch)
+        - name: directory-name
+          value: "repo1"
+      workspaces:
+        - name: output
+          workspace: pipeline-ws
+
+    - name: git-clone-common
+      runafter: [git-clone]
+      taskRef:
+        name: git-clone-repo
+      params:
+        - name: repository
+          value: $(params.common_repo)
+        - name: branch
+          value: $(params.common_branch)
+        - name: directory-name
+          value: "repo2"
+      workspaces:
+        - name: output
+          workspace: pipeline-ws
+
+    - name: toolchain-duplication-task
+      runafter: [git-clone-common]
+      taskRef:
+        name: toolchain-duplication-task
+      params:
+        - name: code_branch
+          value: $(params.code_branch)
+        - name: code_repository
+          value: $(params.code_repository)
+        - name: common_repo
+          value: $(params.common_repo)
+        - name: common_branch
+          value: $(params.common_branch)
+        - name: toolchain_link
+          value: $(params.toolchain_link)
+        - name: template_org_repo
+          value: $(params.template_org_repo)
+        - name: secrets_needed
+          value: $(params.secrets_needed)
+        - name: toolchain_account_apikey
+          value: $(params.toolchain_account_apikey)
+
+      workspaces:
+        - name: output
+          workspace: pipeline-ws
+
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: toolchain-duplication-task
+spec:
+  params:
+    - name: code_branch
+    - name: code_repository
+    - name: common_repo
+    - name: common_branch
+    - name: toolchain_link
+    - name: template_org_repo
+    - name: secrets_needed
+    - name: toolchain_account_apikey
+  workspaces:
+    - name: output
+      mountPath: /artifacts
+  steps:
+    - name: run-tests
+      envFrom:
+        - secretRef:
+            name: secure-properties
+      env:
+        - name: code_branch
+          value: $(params.code_branch)
+        - name: code_repository
+          value: $(params.code_repository)
+        - name: common_repo
+          value: $(params.common_repo)
+        - name: common_branch
+          value: $(params.common_branch)
+        - name: toolchain_link
+          value: $(params.toolchain_link)
+        - name: template_org_repo
+          value: $(params.template_org_repo)
+        - name: secrets_needed
+          value: $(params.secrets_needed)
+        - name: toolchain_account_apikey
+          value: $(params.toolchain_account_apikey)
+
+        - name: PIPELINE_RUN_URL
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['devops.cloud.ibm.com/pipeline-run-url']
+
+      image: icr.io/continuous-delivery/cat-base
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -e -o pipefail;
+          curl -fsSL https://clis.cloud.ibm.com/install/linux | bash
+          ibmcloud plugin install cloud-databases
+
+          cd /artifacts;         
+          ls
+          pip3 install -q -r repo1/requirements.txt 
+          pip3 install -q -r repo2/requirements.txt 
+          cp -r repo2/* ./
+          cp -r repo1/* ./
+          ibmcloud login --apikey $toolchain_account_apikey --no-region;
+          ./toolchain-to-template.sh $toolchain_link
+          ls

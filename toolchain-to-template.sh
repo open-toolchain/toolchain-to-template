@@ -46,7 +46,9 @@ function download_classic_pipeline() {
 
   echo 'Get classic pipeline content: curl -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml" ' ${PIPELINE_API_URL}
   curl -s -H "Authorization: $BEARER_TOKEN" -H "Accept: application/x-yaml"  -o "${SOURCE_PIPELINE_ID}.yaml" "${PIPELINE_API_URL}"
+  
 
+  echo ${SOURCE_PIPELINE_ID}
   # echo "YAML from source classic pipeline"
   # cat "${SOURCE_PIPELINE_ID}.yaml"
 
@@ -186,8 +188,14 @@ function download_tekton_pipeline() {
   # echo "YAML from source tekton pipeline"
   # echo "==="
   # cat "${SOURCE_PIPELINE_ID}.yaml"
-  # echo "==="
-
+  echo "==="
+  echo ${PIPELINE_API_URL}
+  echo ${SOURCE_PIPELINE_ID}
+  echo "==="
+  if ${secrets_needed} then
+    python3 ../update_secure_value.py ${SOURCE_PIPELINE_ID} ${SOURCE_PIPELINE_ID}.yaml
+  fi
+  #("${SOURCE_PIPELINE_ID}","${SOURCE_PIPELINE_ID}".yaml)
   # convert the yaml to json
   if [ "$OLD_YQ_VERSION" = true ] ; then
     yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
