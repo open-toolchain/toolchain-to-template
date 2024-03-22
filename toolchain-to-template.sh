@@ -263,7 +263,7 @@ function download_tekton_pipeline() {
   if [ "$OLD_YQ_VERSION" = true ] ; then
     yq read "${YQ_PRETTY_PRINT}" $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
   else
-    yq -P $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
+    yq --output-format=yaml -P $TARGET_PIPELINE_ID.json > $TARGET_PIPELINE_ID.yml
   fi
 
   echo "Tekton pipeline content generated: $TARGET_PIPELINE_ID.yml"
