@@ -18,7 +18,8 @@
 #    - For a dedicated environment, use `cf` CLI to log in to the account.  
 #      The `cf` CLI installers are at: https://github.com/cloudfoundry/cli#installers-and-compressed-binaries
 # 6) Visit your Toolchain in the browser and copy the URL
-#
+# 7) To copy secret reference create environment variable `secrets_needed` and set it to be `true`
+# 8) install the dependencies mentioned in requirements.txt
 # RUN THE SCRIPT
 # In a shell run the following: `./toolchain-to-template.sh https://your-toolchain-url`
 #
@@ -187,7 +188,11 @@ function download_tekton_pipeline() {
   # echo "==="
   # cat "${SOURCE_PIPELINE_ID}.yaml"
   # echo "==="
-
+  
+  if ${secrets_needed}; then
+    python3 ../update_secure_value.py ${SOURCE_PIPELINE_ID} ${SOURCE_PIPELINE_ID}.yaml
+  fi
+  #("${SOURCE_PIPELINE_ID}","${SOURCE_PIPELINE_ID}".yaml)
   # convert the yaml to json
   if [ "$OLD_YQ_VERSION" = true ] ; then
     yq r -j ${SOURCE_PIPELINE_ID}.yaml > ${SOURCE_PIPELINE_ID}.json
