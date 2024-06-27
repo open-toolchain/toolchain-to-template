@@ -69,3 +69,91 @@ def getPipelineInfo(pipelineId, pipelineType):
         return execute(command, maxTries=MAX_RETRIES, outputCommand=False, outputResult=False)
     except subprocess.CalledProcessError as e:
         _logAndRaise(e, "Failed to run: " + command)
+
+
+
+# Pushed the modified file to git using ghToken
+# org (string) is the organization id of git repository
+# repo (string) is the git repository name
+# filename (string) is the name of the file to be pushed to git. can contain the path if the file resides in a folder
+# branch (string) is the name of the branch to push the file
+# githubToken (string) is the github token
+# msg (string) is the commit message
+# localFilePath (string) is the path to the updated file that you have in local.
+# Example inputs:
+#   pushToGithub("org-ids","key-rotation","name of the file", "new branch name","12345","commit message")
+# Expected output:
+#   Returns the http response in case of success
+#   Returns None in case of failure
+def pushToGithub(org,repo,fileName, branch, githubToken,msg,localFilePath):
+    print(f"\nStarted pushing {localFilePath} to {org}/{repo}/{fileName} in branch {branch}")
+
+    headers = {"Accept": "application/vnd.github.v3+json", "Authorization": "token "+githubToken}
+    segments=fileName.split('/')
+    if segments[0] == '.':
+        parentSegments=segments[1:-1]
+    else:
+        parentSegments=segments[:-1] 
+    parent='/'.join(parentSegments)
+    parentUrl = f"{git_url}/repos/{org}/{repo}/git/trees/{branch}:{parent}"
+    parentResponse = requests.get(parentUrl+'?ref='+branch, headers = headers)
+    if parentResponse.ok or parentResponse.status_code == 404:
+        parentData = parentResponse.json()
+        simpleName=fileName.split('/')[-1]
+        file = None
+        for fileData in parentData.get('tree', []):
+            if fileData['path'] == simpleName:
+                file = fileData
+                break
+        with open(localFilePath, 'rb') as f:
+            base64content=base64.b64encode(f.read())
+        url = git_url + "/repos/"+org+"/"+repo+"/contents/"+fileName
+        if file:
+            blobUrl = file['url']
+            blobResp = requests.get(blobUrl, headers = headers)
+            if blobResp.ok:
+                blob = blobResp.json()
+                localFileContent = base64content.decode('utf-8')
+                remoteFileContent = blob['content'].replace('\n', '')
+                if localFileContent != remoteFileContent:
+                    data = json.dumps({"message":msg,
+                                        "branch": branch,
+                                        "content": base64content.decode("utf-8") ,
+                                        "sha": file['sha']
+                                        })
+                    resp = requests.put(url, data, headers = headers)
+                    if resp.ok:
+                        print(f"\nUpdating {org}/{repo}/{fileName} was successful")
+                        result = resp.json()
+                        return result
+                    else: 
+                        print(f"\nError while updating {org}/{repo}/{fileName} in branch {branch}")
+                        print(f"Response: {resp.json()}")
+                        return None
+                else:
+                    print(f"\nNo changes to {org}/{repo}/{fileName} in branch {branch}")
+                    return blobResp.json()
+            else:
+                print(f"\nError while getting {blobUrl}")
+                print(f"Response: {blobResp.json()}")
+                return None
+        else:
+            # file not found, create it
+            data = json.dumps({"message":msg,
+                                "branch": branch,
+                                "content": base64content.decode("utf-8") ,
+                                })
+            resp = requests.put(url, data, headers = headers)
+            if resp.ok:
+                print(f"\nCreating {org}/{repo}/{fileName} was successful")
+                result = resp.json()
+                return result
+            else: 
+                print(f"\nError while creating {org}/{repo}/{fileName} in branch {branch}")
+                print(f"Response: {resp.json()}")
+                return None
+    else:
+        print(f"\nError while getting {parentUrl}")
+        print(f"Response: {parentResponse.json()}")
+        return None
+ 
